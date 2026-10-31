@@ -226,8 +226,10 @@ private val barKeys = listOf(
         )
     } else Modifier.verticalScroll(vertical)
     var viewport by remember { mutableStateOf(IntSize.Zero) }
-    LaunchedEffect(viewport, width, lineHeight) {
-        if (viewport == IntSize.Zero) return@LaunchedEffect
+    val pinching = pinchSize != null
+    LaunchedEffect(viewport, width, lineHeight, pinching) {
+        // Resize the remote program once, after the pinch, not for every preview size.
+        if (viewport == IntSize.Zero || pinching) return@LaunchedEffect
         delay(120) // Settle keyboard and pinch changes before resizing the remote terminal.
         vm.nativeReady(((viewport.width - padding) / width).toInt(), ((viewport.height - padding) / lineHeight).toInt())
     }

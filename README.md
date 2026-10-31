@@ -44,7 +44,7 @@ printf 'sdk.dir=/absolute/path/to/Android/Sdk\n' > local.properties
 ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
 ```
 
-Install `app/build/outputs/apk/debug/app-debug.apk`. It is a **debug-signed test build**, with app ID `dev.herdr.pocket`, and requires Android 8.0/API 26 or newer. Source includes a Gradle wrapper pinned to its distribution checksum. For production distribution, configure your own release signing key.
+Install `app/build/outputs/apk/debug/app-debug.apk`. GitHub Actions (`.github/workflows/android.yml`) runs the same build, tests and lint, plus the terminal page checks, on every pull request and push to `main`; download the APK from the run's **Artifacts**. It is a **debug-signed test build**, with app ID `dev.herdr.pocket`, and requires Android 8.0/API 26 or newer. Source includes a Gradle wrapper pinned to its distribution checksum. For production distribution, configure your own release signing key.
 
 Protocol integration tests can use a real core without touching your installed session:
 

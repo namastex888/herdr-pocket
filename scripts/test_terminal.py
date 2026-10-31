@@ -97,6 +97,16 @@ try:
         assert after[0] == min(24, before[0] * 2) and after[1] < before[1], (before, after)
         assert page.evaluate('window.__font') == after[0]
         assert page.evaluate('window.__keys.length') == 0
+        # A third finger ends the pinch, and the new size is still reported.
+        page.evaluate("""() => {
+          window.__font=null;
+          const target=document.querySelector('.xterm-screen');
+          const t=(id,x)=>new Touch({identifier:id,target,clientX:x,clientY:200,pageX:x,pageY:200});
+          target.dispatchEvent(new TouchEvent('touchstart',{bubbles:true,cancelable:true,touches:[t(1,100),t(2,300)]}));
+          target.dispatchEvent(new TouchEvent('touchmove',{bubbles:true,cancelable:true,touches:[t(1,150),t(2,250)]}));
+          target.dispatchEvent(new TouchEvent('touchstart',{bubbles:true,cancelable:true,touches:[t(1,150),t(2,250),t(3,200)]}));
+        }""")
+        assert page.evaluate('window.__font') == page.evaluate('terminal.options.fontSize') < after[0]
         page.evaluate('window.setFontSize(99)')
         assert page.evaluate('terminal.options.fontSize') == 24
         assert not failures, failures

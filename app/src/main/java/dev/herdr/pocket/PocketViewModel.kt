@@ -16,7 +16,12 @@ import java.util.concurrent.ConcurrentHashMap
 // session increases with each successful connection, so open terminal views know to attach again.
 data class MachineState(val connecting: Boolean = false, val connected: Boolean = false, val version: String = "",
     val terminals: List<CoreTerminal> = emptyList(), val spaces: List<PocketSpace> = emptyList(), val error: String? = null,
-    val session: Int = 0)
+    val session: Int = 0, val needsPassword: Boolean = false) {
+    /** Dropped or failed, as opposed to never connected or disconnected on purpose. */
+    val offline get() = !connected && (connecting || error != null)
+    /** Worth retrying without asking: a dropped or failed connection that isn't waiting on a password. */
+    val retryable get() = !connected && !connecting && error != null && !needsPassword
+}
 data class TerminalRef(val hostId: String, val address: String)
 /** Asks for an SSH password after a host rejected this phone's key (or a previous password). */
 data class PasswordPrompt(val hostId: String, val rejected: Boolean)
@@ -77,7 +82,12 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     fun saveHost(profile: HostProfile) {
         if (state.value.demo) leaveDemo()
         val hosts = state.value.hosts
-        saveHosts(if (hosts.any { it.id == profile.id }) hosts.map { if (it.id == profile.id) profile else it } else hosts + profile)
+        val previous = hosts.find { it.id == profile.id }
+        val moved = previous != null && (previous.host != profile.host || previous.port != profile.port || previous.user != profile.user || previous.session != profile.session)
+        val live = state.value.machines[profile.id]?.let { it.connected || it.connecting } == true
+        saveHosts(if (previous != null) hosts.map { if (it.id == profile.id) profile else it } else hosts + profile)
+        // A live connection to the old address would otherwise keep running under the new name.
+        if (moved && live) connect(profile)
     }
     fun removeHost(id: String) {
         disconnect(id)
@@ -101,11 +111,11 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
 
     fun connect(profile: HostProfile, password: String? = null) {
         disconnect(profile.id)
-        _state.update { it.copy(passwordPrompt = null) }
+        _state.update { if (it.passwordPrompt?.hostId == profile.id) it.copy(passwordPrompt = null) else it }
         if (state.value.demo) leaveDemo()
         if (!password.isNullOrBlank()) temporaryPasswords[profile.id] = password
         jobs[profile.id] = viewModelScope.launch(Dispatchers.IO) {
-            updateMachine(profile.id) { it.copy(connecting = true, connected = false, error = null) }
+            updateMachine(profile.id) { it.copy(connecting = true, connected = false, error = null, needsPassword = false) }
             var client: CoreClient? = null
             try {
                 val transport = keys.open(profile, password)
@@ -114,7 +124,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
                 val c = CoreClient(transport.input, transport.output, transport, connectionScope) { reason ->
                     clients.remove(profile.id)
                     updateMachine(profile.id) { it.copy(connected = false, connecting = false, error = "Disconnected: $reason") }
-                    if (state.value.selected?.hostId == profile.id) _state.update { it.copy(terminalStatus = "Disconnected • reconnect from Machines") }
+                    if (state.value.selected?.hostId == profile.id) _state.update { it.copy(terminalStatus = "Disconnected") }
                 }
                 client = c
                 val hello = c.start()
@@ -138,8 +148,9 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
                 else if (e.isAuthFailure()) {
                     temporaryPasswords.remove(profile.id)
                     val rejected = !password.isNullOrBlank()
-                    updateMachine(profile.id) { it.copy(error = if (rejected) "The host didn’t accept that password." else "The host didn’t accept this phone’s key.") }
-                    _state.update { it.copy(passwordPrompt = PasswordPrompt(profile.id, rejected)) }
+                    updateMachine(profile.id) { it.copy(needsPassword = true, error = if (rejected) "The host didn’t accept that password." else "The host didn’t accept this phone’s key.") }
+                    // Keep a prompt already open for another machine; this one can be retried from its banner.
+                    _state.update { if (it.passwordPrompt == null || it.passwordPrompt.hostId == profile.id) it.copy(passwordPrompt = PasswordPrompt(profile.id, rejected)) else it }
                 }
                 else { temporaryPasswords.remove(profile.id); updateMachine(profile.id) { it.copy(error = e.message ?: "Connection failed") } }
                 updateMachine(profile.id) { it.copy(connecting = false, connected = false) }
@@ -160,7 +171,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         if (state.value.refreshing) return
         if (state.value.demo) { viewModelScope.launch { _state.update { it.copy(refreshing = true) }; delay(400); _state.update { it.copy(refreshing = false) } }; return }
         _state.update { it.copy(refreshing = true) }
-        val retry = state.value.hosts.filter { h -> state.value.machines[h.id]?.let { !it.connected && !it.connecting && it.error != null } == true }
+        val retry = state.value.hosts.filter { h -> state.value.machines[h.id]?.retryable == true }
         retry.forEach { connect(it) }
         viewModelScope.launch(Dispatchers.IO) {
             val started = System.currentTimeMillis()
@@ -182,7 +193,8 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         if (state.value.selected?.hostId == id) detach()
         jobs.remove(id)?.cancel()
         clients.remove(id)?.close()
-        updateMachine(id) { it.copy(connected = false, connecting = false) }
+        // A deliberate disconnect is not an error to surface or retry.
+        updateMachine(id) { it.copy(connected = false, connecting = false, error = null, needsPassword = false) }
     }
     private fun updateMachine(id: String, transform: (MachineState) -> MachineState) {
         _state.update { it.copy(machines = it.machines + (id to transform(it.machines[id] ?: MachineState()))) }

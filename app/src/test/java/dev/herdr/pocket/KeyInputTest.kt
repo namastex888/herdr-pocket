@@ -49,5 +49,9 @@ class KeyInputTest {
         assertEquals("a\rb\rc", String(KeyInput.paste("a\r\nb\nc", false)))
         assertEquals("\u001b[200~ls\r\u001b[201~", String(KeyInput.paste("ls\n", true)))
         assertEquals("\u001b[200~xrm\u001b[201~", String(KeyInput.paste("x\u001b[201~rm", true)))
+        // A nested terminator must not survive a single removal pass.
+        val nested = String(KeyInput.paste("\u001b[20\u001b[201~1~rm -rf ~\n", true))
+        assertEquals(1, Regex(Regex.escape("\u001b[201~")).findAll(nested).count())
+        assertTrue(nested.endsWith("\u001b[201~"))
     }
 }

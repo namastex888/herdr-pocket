@@ -280,7 +280,7 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
     val scoped = all.filter { (ref, _) -> state.space == null || (ref.hostId == state.space.first && ref.address in space?.addresses.orEmpty()) }
     val shown = scoped.filter { (_, t) -> search.isBlank() || "${t.title} ${t.agent} ${t.cwd} ${t.message}".contains(search, true) }
     // Machines whose connection dropped or failed; their terminal list may be stale.
-    val offline = if (state.demo) emptyList() else state.hosts.filter { h -> state.machines[h.id]?.let { !it.connected && (it.connecting || it.error != null) } == true }
+    val offline = if (state.demo) emptyList() else state.hosts.filter { h -> state.machines[h.id]?.offline == true }
     PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = vm::refreshAll, modifier = Modifier.fillMaxSize()) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp, 24.dp, 20.dp, 32.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         items(offline, key = { "offline:${it.id}" }) { host ->
@@ -333,8 +333,7 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
             items(terminals, key = { "${it.first.hostId}:${it.first.address}" }) { (ref, terminal) ->
                 val machine = state.machines[ref.hostId]
                 val s = machine?.spaces?.find { ref.address in it.addresses }
-                val host = if (state.demo) "dev-machine" else state.hosts.find { it.id == ref.hostId }?.name.orEmpty()
-                TerminalCard(terminal, s?.name ?: host, ref.address) { vm.selectTerminal(ref) }
+                TerminalCard(terminal, s?.name ?: vm.hostName(ref.hostId), ref.address) { vm.selectTerminal(ref) }
             }
         }
         if (shown.isEmpty()) item {

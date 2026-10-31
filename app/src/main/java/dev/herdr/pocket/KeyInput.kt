@@ -10,6 +10,8 @@ object KeyInput {
     private const val ESC = "\u001b"
     private val cursor = Regex("^\u001b[\\[O]([ABCDHF])$")
     private val tilde = Regex("^\u001b\\[(\\d+)~$")
+    private val csiCursor = Regex("^\u001b\\[([ABCDHF])$")
+    private const val PASTE_END = "\u001b[201~"
 
     /**
      * Applies armed modifiers using xterm conventions. Returns null when the input is not a key
@@ -45,13 +47,16 @@ object KeyInput {
     /** Unmodified cursor keys use SS3 while a program has enabled application cursor mode (DECCKM). */
     fun cursorKeys(bytes: ByteArray, application: Boolean): ByteArray {
         if (!application) return bytes
-        val match = Regex("^\u001b\\[([ABCDHF])$").find(String(bytes, Charsets.UTF_8)) ?: return bytes
+        val match = csiCursor.find(String(bytes, Charsets.UTF_8)) ?: return bytes
         return "${ESC}O${match.groupValues[1]}".toByteArray()
     }
 
     /** Matches xterm.js paste: newlines become CR, and bracketed paste is wrapped and cannot be closed early. */
     fun paste(text: String, bracketed: Boolean): ByteArray {
-        val body = text.replace("\r\n", "\r").replace('\n', '\r')
-        return (if (bracketed) "$ESC[200~" + body.replace("$ESC[201~", "") + "$ESC[201~" else body).toByteArray()
+        var body = text.replace("\r\n", "\r").replace('\n', '\r')
+        if (!bracketed) return body.toByteArray()
+        // Remove until stable: one pass could reassemble a terminator from nested pieces.
+        while (PASTE_END in body) body = body.replace(PASTE_END, "")
+        return "$ESC[200~$body$PASTE_END".toByteArray()
     }
 }

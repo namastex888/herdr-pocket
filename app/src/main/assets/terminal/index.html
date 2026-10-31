@@ -34,10 +34,11 @@ const surface=document.getElementById('terminal');
 let touch=null,pinch=null,suppressClickUntil=0;
 // Two fingers change the text size; the app stores it when the fingers lift.
 const spread=t=>Math.hypot(t[0].clientX-t[1].clientX,t[0].clientY-t[1].clientY)||1;
+const endPinch=()=>{if(pinch&&terminal.options.fontSize!==pinch.size)Pocket.fontSize(terminal.options.fontSize);pinch=null};
 window.setFontSize=n=>{const size=clampFont(n);if(size!==terminal.options.fontSize){terminal.options.fontSize=size;resized()}};
 surface.addEventListener('touchstart',e=>{
   if(e.touches.length===2){touch=null;pinch={distance:spread(e.touches),size:terminal.options.fontSize};return}
-  if(e.touches.length!==1){touch=null;pinch=null;return}
+  if(e.touches.length!==1){touch=null;endPinch();return}
   const p=e.touches[0];touch={x:p.clientX,y:p.clientY,last:p.clientY,pending:0,dragged:false};
 },{capture:true,passive:true});
 surface.addEventListener('touchmove',e=>{
@@ -61,13 +62,13 @@ surface.addEventListener('touchmove',e=>{
 surface.addEventListener('touchend',e=>{
   if(pinch){
     e.preventDefault();e.stopImmediatePropagation();suppressClickUntil=Date.now()+400;
-    if(e.touches.length<2){if(terminal.options.fontSize!==pinch.size)Pocket.fontSize(terminal.options.fontSize);pinch=null}
+    if(e.touches.length<2)endPinch()
     touch=null;return;
   }
   if(touch&&touch.dragged){e.preventDefault();e.stopImmediatePropagation();suppressClickUntil=Date.now()+400}
   touch=null;
 },{capture:true,passive:false});
-surface.addEventListener('touchcancel',()=>{touch=null;if(pinch){if(terminal.options.fontSize!==pinch.size)Pocket.fontSize(terminal.options.fontSize);pinch=null}},{capture:true,passive:true});
+surface.addEventListener('touchcancel',()=>{touch=null;endPinch()},{capture:true,passive:true});
 surface.addEventListener('click',e=>{if(Date.now()<suppressClickUntil){e.preventDefault();e.stopImmediatePropagation()}},{capture:true});
 function measure(){if(!document.documentElement.clientHeight)return;const dimensions=fit.proposeDimensions();if(!dimensions||dimensions.cols<2||dimensions.rows<2)return;fit.fit();if(!ready){ready=true;Pocket.ready(terminal.cols,terminal.rows)}else Pocket.resized(terminal.cols,terminal.rows)}
 const resized=()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(measure,120)};
