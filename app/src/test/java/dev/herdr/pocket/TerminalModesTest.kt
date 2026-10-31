@@ -30,4 +30,11 @@ class TerminalModesTest {
         assertTrue(modes.mouseTracking)
         modes.feed("\u001b[?1003l".toByteArray()); assertFalse(modes.mouseTracking)
     }
+    @Test fun tracksCursorKeyAndBracketedPasteModes() {
+        val modes = TerminalModes()
+        modes.feed("\u001b[?1h\u001b[?20".toByteArray()); modes.feed("04h".toByteArray())
+        assertTrue(modes.applicationCursor); assertTrue(modes.bracketedPaste)
+        modes.feed("\u001b[?1l".toByteArray()); assertFalse(modes.applicationCursor); assertTrue(modes.bracketedPaste)
+        modes.feed("\u001bc".toByteArray()); assertFalse(modes.bracketedPaste)
+    }
 }

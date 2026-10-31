@@ -80,4 +80,8 @@ class SshKeys(private val identityRoot: File) {
     }
 }
 
+/** JSch reports rejected credentials as "Auth fail…" or "Auth cancel…", possibly wrapped. */
+fun Throwable.isAuthFailure(): Boolean = generateSequence(this) { it.cause }.take(8)
+    .any { it is JSchException && (it.message.orEmpty().startsWith("Auth fail") || it.message.orEmpty().startsWith("Auth cancel")) }
+
 fun shellQuote(s: String) = "'" + s.replace("'", "'\\''") + "'"

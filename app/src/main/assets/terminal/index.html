@@ -1,5 +1,5 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'none'; connect-src 'none'">
 <link rel="stylesheet" href="xterm.css">
 <style>html,body{width:100%;height:100vh;margin:0;background:#17191d;overflow:hidden}#terminal{position:fixed;top:0;right:0;bottom:0;left:0;padding:6px;box-sizing:border-box}#latest{position:fixed;right:12px;bottom:12px;border:1px solid #394454;border-radius:16px;background:#23252a;color:#96b2d7;padding:10px 14px;font:12px sans-serif;z-index:5}#latest[hidden]{display:none}.xterm-viewport::-webkit-scrollbar{width:3px}.xterm-viewport::-webkit-scrollbar-thumb{background:#394454}</style>
@@ -10,7 +10,9 @@ for(const type of [Element,Document,DocumentFragment])if(!type.prototype.replace
 window.addEventListener('error',e=>Pocket.failed((e.error&&e.error.stack)||e.message||'Terminal renderer error'));
 </script><script src="xterm.js"></script><script src="addon-fit.js"></script>
 <script>
-const terminal=new Terminal({fontFamily:'monospace',fontSize:13,lineHeight:1.2,scrollback:5000,cursorBlink:true,convertEol:false,allowProposedApi:false,
+const fontRange=[8,24],clampFont=n=>Math.max(fontRange[0],Math.min(fontRange[1],Math.round(n)||13));
+const initialFont=clampFont(Number(new URLSearchParams(location.search).get('font'))||13);
+const terminal=new Terminal({fontFamily:'monospace',fontSize:initialFont,lineHeight:1.2,scrollback:5000,cursorBlink:true,convertEol:false,allowProposedApi:false,
 theme:{background:'#17191d',foreground:'#d2d4d9',cursor:'#d2d4d9',selectionBackground:'#394454',black:'#45484f',red:'#dc8c95',green:'#a6bd91',yellow:'#d8be87',blue:'#96b2d7',magenta:'#b5a2ce',cyan:'#8cbdc3',white:'#d2d4d9',brightBlack:'#818793',brightRed:'#f0a5ad',brightGreen:'#bad5a2',brightYellow:'#ead2a1',brightBlue:'#b0cbef',brightMagenta:'#cbb7e6',brightCyan:'#a4d5db',brightWhite:'#f0f0f2'}});
 const fit=new FitAddon.FitAddon();terminal.loadAddon(fit);terminal.open(document.getElementById('terminal'));
 // hc answers terminal queries. Forward human input only, never emulator query replies.
@@ -29,12 +31,18 @@ terminal.onScroll(updateLatest);terminal.onWriteParsed(updateLatest);
 // xterm's built-in touch scrolling only moves its local viewport. Full-screen
 // programs (Claude, tmux, etc.) own their history and must receive wheel events.
 const surface=document.getElementById('terminal');
-let touch=null,suppressClickUntil=0;
+let touch=null,pinch=null,suppressClickUntil=0;
+// Two fingers change the text size; the app stores it when the fingers lift.
+const spread=t=>Math.hypot(t[0].clientX-t[1].clientX,t[0].clientY-t[1].clientY)||1;
+const endPinch=()=>{if(pinch&&terminal.options.fontSize!==pinch.size)Pocket.fontSize(terminal.options.fontSize);pinch=null};
+window.setFontSize=n=>{const size=clampFont(n);if(size!==terminal.options.fontSize){terminal.options.fontSize=size;resized()}};
 surface.addEventListener('touchstart',e=>{
-  if(e.touches.length!==1){touch=null;return}
+  if(e.touches.length===2){touch=null;pinch={distance:spread(e.touches),size:terminal.options.fontSize};return}
+  if(e.touches.length!==1){touch=null;endPinch();return}
   const p=e.touches[0];touch={x:p.clientX,y:p.clientY,last:p.clientY,pending:0,dragged:false};
 },{capture:true,passive:true});
 surface.addEventListener('touchmove',e=>{
+  if(pinch&&e.touches.length===2){e.preventDefault();e.stopImmediatePropagation();window.setFontSize(pinch.size*spread(e.touches)/pinch.distance);return}
   if(!touch||e.touches.length!==1)return;
   const p=e.touches[0],dy=p.clientY-touch.y,dx=p.clientX-touch.x;
   if(!touch.dragged){
@@ -52,10 +60,15 @@ surface.addEventListener('touchmove',e=>{
   updateLatest();
 },{capture:true,passive:false});
 surface.addEventListener('touchend',e=>{
+  if(pinch){
+    e.preventDefault();e.stopImmediatePropagation();suppressClickUntil=Date.now()+400;
+    if(e.touches.length<2)endPinch()
+    touch=null;return;
+  }
   if(touch&&touch.dragged){e.preventDefault();e.stopImmediatePropagation();suppressClickUntil=Date.now()+400}
   touch=null;
 },{capture:true,passive:false});
-surface.addEventListener('touchcancel',()=>{touch=null},{capture:true,passive:true});
+surface.addEventListener('touchcancel',()=>{touch=null;endPinch()},{capture:true,passive:true});
 surface.addEventListener('click',e=>{if(Date.now()<suppressClickUntil){e.preventDefault();e.stopImmediatePropagation()}},{capture:true});
 function measure(){if(!document.documentElement.clientHeight)return;const dimensions=fit.proposeDimensions();if(!dimensions||dimensions.cols<2||dimensions.rows<2)return;fit.fit();if(!ready){ready=true;Pocket.ready(terminal.cols,terminal.rows)}else Pocket.resized(terminal.cols,terminal.rows)}
 const resized=()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(measure,120)};

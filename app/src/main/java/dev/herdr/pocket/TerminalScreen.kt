@@ -8,6 +8,10 @@ import android.webkit.*
 import android.view.inputmethod.InputMethodManager
 import android.content.Context
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,7 +23,18 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.text.style.TextOverflow
+import android.view.HapticFeedbackConstants
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -34,7 +49,10 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewAssetLoader
 import org.json.JSONObject
 import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 @Composable fun TerminalScreen(vm: PocketViewModel, state: PocketState, terminal: CoreTerminal?, space: PocketSpace?, onNavigation: () -> Unit) {
     val ref = state.selected ?: return
@@ -50,14 +68,18 @@ import kotlinx.coroutines.launch
         if (showComposer) { showComposer = false; keyboard?.hide() } else controls = false
     }
     LaunchedEffect(showComposer) { if (showComposer) { composerFocus.requestFocus(); keyboard?.show() } }
+    val machine = state.machines[ref.hostId]
+    val offline = !state.demo && machine?.connected != true
     Box(Modifier.fillMaxSize().background(Surface).displayCutoutPadding()) {
         Column(Modifier.fillMaxSize()) {
             if (!fullscreen) TerminalTabs(vm, state, space)
-            key(ref, state.nativeDisplay) {
-                if (state.nativeDisplay) NativeTerminal(vm, state.screenText, state.nativeAlternateScreen, Modifier.fillMaxWidth().weight(1f))
+            // A new connection session recreates the view, which attaches the terminal again.
+            key(ref, state.nativeDisplay, machine?.session) {
+                if (state.nativeDisplay) NativeTerminal(vm, state.screenText, state.nativeAlternateScreen, state.fontSize, Modifier.fillMaxWidth().weight(1f))
                 else TerminalCanvas(vm, Modifier.fillMaxWidth().weight(1f)) { focusTerminal = it }
             }
-            if (!fullscreen || controls || keyboardVisible || showComposer) TerminalKeys(vm, state.demo)
+            if (offline) OfflineStrip(vm.hostName(ref.hostId), machine?.connecting == true) { vm.reconnect(ref.hostId) }
+            if (!offline && (!fullscreen || controls || keyboardVisible || showComposer)) TerminalKeys(vm, state)
             if (showComposer) Row(Modifier.fillMaxWidth().background(Chrome).padding(10.dp, 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(message, { message = it }, placeholder = { Text("Message this agent…", fontSize = 12.sp) }, modifier = Modifier.weight(1f).focusRequester(composerFocus), maxLines = 4, shape = RoundedCornerShape(12.dp))
                 IconButton(onClick = { val draft = message; vm.sendMessage(draft) { if (message == draft) message = "" } }, enabled = message.isNotBlank() && !state.demo && !state.sending && state.terminalStatus.startsWith("Live")) {
@@ -66,7 +88,7 @@ import kotlinx.coroutines.launch
                 IconButton(onClick = { showComposer = false; keyboard?.hide() }) { Icon(Icons.Outlined.Close, "Close composer", tint = Muted) }
             }
             if (!fullscreen || controls) Row(Modifier.fillMaxWidth().background(Chrome).padding(horizontal = 10.dp).navigationBarsPadding(), verticalAlignment = Alignment.CenterVertically) {
-                Text(state.terminalStatus, color = if (state.terminalStatus.startsWith("Live")) Muted else Accent, fontSize = 9.sp, modifier = Modifier.weight(1f), maxLines = 1)
+                Text(state.terminalStatus, color = if (state.terminalStatus.startsWith("Live")) Muted else Accent, fontSize = 11.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 IconButton(onClick = { showComposer = !showComposer; controls = false }) { Icon(Icons.Outlined.ChatBubbleOutline, "Toggle message composer", Modifier.size(20.dp), tint = if (showComposer) Accent else Muted) }
                 IconButton(onClick = { controls = false; if (state.nativeDisplay) showComposer = true else focusTerminal?.invoke() }) { Icon(Icons.Outlined.Keyboard, "Open terminal keyboard", Modifier.size(22.dp), tint = Accent) }
             }
@@ -78,7 +100,7 @@ import kotlinx.coroutines.launch
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = vm::backToList) { Icon(Icons.Outlined.ArrowBack, "Back to agents") }
                 IconButton(onClick = { controls = false; onNavigation() }) { Icon(Icons.Outlined.Menu, "Open navigation") }
-                Text(terminal?.title ?: ref.address, modifier = Modifier.weight(1f), fontSize = 13.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                Text(terminal?.title ?: ref.address, modifier = Modifier.weight(1f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 IconButton(onClick = { controls = false; vm.setTerminalFullscreen(false) }) { Icon(Icons.Outlined.FullscreenExit, "Exit full screen") }
                 IconButton(onClick = { controls = false }) { Icon(Icons.Outlined.Close, "Hide terminal controls") }
             }
@@ -111,23 +133,79 @@ import kotlinx.coroutines.launch
     }
 }
 
-@Composable private fun TerminalKeys(vm: PocketViewModel, demo: Boolean) {
+@Composable private fun OfflineStrip(host: String, connecting: Boolean, onReconnect: () -> Unit) {
+    Row(Modifier.fillMaxWidth().background(Blocked.copy(alpha = .12f)).padding(start = 16.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Dot(if (connecting) Working else Blocked, 7); Spacer(Modifier.width(10.dp))
+        Text(if (connecting) "Reconnecting to $host…" else "Disconnected from $host", fontSize = 13.sp, color = Ink,
+            modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (connecting) CircularProgressIndicator(Modifier.padding(14.dp).size(18.dp), strokeWidth = 2.dp)
+        else TextButton(onClick = onReconnect) { Text("Reconnect") }
+    }
+}
+
+private data class BarKey(val label: String, val bytes: String, val description: String = label, val repeats: Boolean = false)
+private val barKeys = listOf(
+    BarKey("tab", "\t", "Tab"), BarKey("⇧tab", "\u001b[Z", "Shift Tab"),
+    BarKey("↑", "\u001b[A", "Up", true), BarKey("↓", "\u001b[B", "Down", true),
+    BarKey("←", "\u001b[D", "Left", true), BarKey("→", "\u001b[C", "Right", true),
+    BarKey("enter", "\r", "Enter"), BarKey("^C", "\u0003", "Control C"),
+    BarKey("home", "\u001b[H", "Home"), BarKey("end", "\u001b[F", "End"),
+    BarKey("pg up", "\u001b[5~", "Page up", true), BarKey("pg dn", "\u001b[6~", "Page down", true),
+    BarKey("/", "/", "Slash"), BarKey("-", "-", "Dash"), BarKey("|", "|", "Pipe"), BarKey("~", "~", "Tilde"))
+
+@Composable private fun TerminalKeys(vm: PocketViewModel, state: PocketState) {
+    val view = LocalView.current
+    val clipboard = LocalClipboardManager.current
+    val enabled = !state.demo
+    fun tap(action: () -> Unit) { view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP); action() }
     Row(Modifier.fillMaxWidth().background(Chrome).horizontalScroll(rememberScrollState()).padding(6.dp), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
-        val keys = listOf("esc" to "\u001b", "tab" to "\t", "ctrl+c" to "\u0003", "↑" to "\u001b[A", "↓" to "\u001b[B", "←" to "\u001b[D", "→" to "\u001b[C", "pg up" to "\u001b[5~", "pg dn" to "\u001b[6~", "enter" to "\r")
-        keys.forEach { (label, value) ->
-            Surface(shape = RoundedCornerShape(7.dp), color = Raised, modifier = Modifier.height(42.dp).clickable(enabled = !demo) { vm.type(value.toByteArray()) }) {
-                Box(Modifier.padding(horizontal = 14.dp), contentAlignment = Alignment.Center) { Text(label, color = Ink, fontFamily = FontFamily.Monospace, fontSize = 11.sp) }
-            }
+        KeyCap("esc", "Escape", enabled) { tap { vm.pressKey("\u001b".toByteArray()) } }
+        KeyCap("ctrl", if (state.modifiers.ctrl) "Control, armed for the next key" else "Control", enabled, active = state.modifiers.ctrl) { tap(vm::toggleCtrl) }
+        KeyCap("alt", if (state.modifiers.alt) "Alt, armed for the next key" else "Alt", enabled, active = state.modifiers.alt) { tap(vm::toggleAlt) }
+        barKeys.forEach { key -> KeyCap(key.label, key.description, enabled, repeats = key.repeats) { tap { vm.pressKey(key.bytes.toByteArray()) } } }
+        KeyCap(null, "Paste clipboard", enabled, icon = Icons.Outlined.ContentPaste) { tap { clipboard.getText()?.text?.let(vm::paste) } }
+    }
+}
+
+/** A key that types on tap and, for cursor-style keys, repeats while held. Dragging scrolls the bar without typing. */
+@Composable private fun KeyCap(label: String?, description: String, enabled: Boolean, active: Boolean = false, repeats: Boolean = false,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null, onPress: () -> Unit) {
+    val press by rememberUpdatedState(onPress)
+    val scope = rememberCoroutineScope()
+    val repeated = remember { booleanArrayOf(false) }
+    Surface(shape = RoundedCornerShape(7.dp), color = if (active) Accent else Raised, modifier = Modifier.height(42.dp).widthIn(min = 42.dp)
+        .semantics(mergeDescendants = true) { role = Role.Button; contentDescription = description; onClick { if (enabled) press(); enabled } }
+        .pointerInput(enabled, repeats) {
+            if (!enabled) return@pointerInput
+            detectTapGestures(
+                onPress = {
+                    if (repeats) {
+                        repeated[0] = false
+                        val job = scope.launch { delay(380); repeated[0] = true; while (isActive) { press(); delay(55) } }
+                        tryAwaitRelease(); job.cancel()
+                    }
+                },
+                onTap = { if (!repeated[0]) press() })
+        }) {
+        Box(Modifier.padding(horizontal = 13.dp), contentAlignment = Alignment.Center) {
+            val tint = if (active) Chrome else if (enabled) Ink else Muted
+            if (icon != null) Icon(icon, null, Modifier.size(18.dp), tint = tint)
+            else Text(label.orEmpty(), color = tint, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
         }
     }
 }
 
-@Composable fun NativeTerminal(vm: PocketViewModel, text: String, alternate: Boolean, modifier: Modifier) {
-    val style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 18.sp, letterSpacing = 0.sp, color = Color(0xffd2d4d9))
+@Composable fun NativeTerminal(vm: PocketViewModel, text: String, alternate: Boolean, fontSize: Int, modifier: Modifier) {
+    // While pinching, the size previews locally and is saved when the fingers lift.
+    var pinchSize by remember { mutableStateOf<Int?>(null) }
+    val size = pinchSize ?: fontSize
+    val currentSize by rememberUpdatedState(fontSize)
+    val lineSp = (size * 18f / 13f).sp
+    val style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = size.sp, lineHeight = lineSp, letterSpacing = 0.sp, color = Color(0xffd2d4d9))
     val measure = rememberTextMeasurer()
     val width = measure.measure("M", style).size.width.coerceAtLeast(1)
     val density = LocalDensity.current
-    val lineHeight = with(density) { 18.sp.toPx() }
+    val lineHeight = with(density) { lineSp.toPx() }
     val padding = with(density) { 16.dp.toPx() }
     val vertical = rememberScrollState()
     val horizontal = rememberScrollState()
@@ -147,9 +225,33 @@ import kotlinx.coroutines.launch
             }
         )
     } else Modifier.verticalScroll(vertical)
-    Box(modifier.background(Surface).onSizeChanged { size ->
-        vm.nativeReady(((size.width - padding) / width).toInt(), ((size.height - padding) / lineHeight).toInt())
-    }.padding(8.dp)) {
+    var viewport by remember { mutableStateOf(IntSize.Zero) }
+    val pinching = pinchSize != null
+    LaunchedEffect(viewport, width, lineHeight, pinching) {
+        // Resize the remote program once, after the pinch, not for every preview size.
+        if (viewport == IntSize.Zero || pinching) return@LaunchedEffect
+        delay(120) // Settle keyboard and pinch changes before resizing the remote terminal.
+        vm.nativeReady(((viewport.width - padding) / width).toInt(), ((viewport.height - padding) / lineHeight).toInt())
+    }
+    val pinch = Modifier.pointerInput(Unit) {
+        awaitEachGesture {
+            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            val start = currentSize
+            var zoom = 1f
+            do {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                if (event.changes.count { it.pressed } >= 2) {
+                    zoom *= event.calculateZoom()
+                    pinchSize = (start * zoom).roundToInt().coerceIn(FONT_SIZES)
+                    event.changes.forEach { it.consume() }
+                }
+            } while (event.changes.any { it.pressed })
+            val chosen = pinchSize
+            if (chosen != null && chosen != start) vm.setFontSize(chosen) else pinchSize = null
+        }
+    }
+    LaunchedEffect(fontSize) { pinchSize = null }
+    Box(modifier.background(Surface).onSizeChanged { viewport = it }.then(pinch).padding(8.dp)) {
         SelectionContainer {
             Text(text.ifBlank { "Connecting…" }, style = style, softWrap = false,
                 modifier = Modifier.fillMaxSize().then(gestures).horizontalScroll(horizontal))
@@ -200,6 +302,7 @@ import kotlinx.coroutines.launch
                 }
             }
             @JavascriptInterface fun painted(revision: Long, channel: Int, count: Int) { if (!disposed) vm.acknowledge(revision, channel, count) }
+            @JavascriptInterface fun fontSize(size: Int) { handler.post { if (!disposed) vm.setFontSize(size) } }
         }, "Pocket")
         vm.resetTerminal = { revision -> handler.post { if (!disposed) webView.evaluateJavascript("window.resetTerminal($revision)", null) } }
         vm.terminalBytes = { revision, channel, bytes ->
@@ -217,7 +320,7 @@ import kotlinx.coroutines.launch
                 (context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(webView, InputMethodManager.SHOW_IMPLICIT)
             }
         }
-        webView.loadUrl("https://appassets.androidplatform.net/assets/terminal/index.html")
+        webView.loadUrl("https://appassets.androidplatform.net/assets/terminal/index.html?font=${vm.state.value.fontSize}")
         onDispose {
             disposed = true; vm.detach(); vm.resetTerminal = null; vm.terminalBytes = null; focus(null)
             webView.removeJavascriptInterface("Pocket"); webView.stopLoading(); webView.destroy()
