@@ -16,7 +16,7 @@ import java.util.concurrent.ConcurrentHashMap
 // session increases with each successful connection, so open terminal views know to attach again.
 data class MachineState(val connecting: Boolean = false, val connected: Boolean = false, val version: String = "",
     val terminals: List<CoreTerminal> = emptyList(), val spaces: List<PocketSpace> = emptyList(), val error: String? = null,
-    val session: Int = 0, val needsPassword: Boolean = false) {
+    val session: Int = 0, val needsPassword: Boolean = false, val linked: List<LinkedMachine> = emptyList()) {
     /** Dropped or failed, as opposed to never connected or disconnected on purpose. */
     val offline get() = !connected && (connecting || error != null)
     /** Worth retrying without asking: a dropped or failed connection that isn't waiting on a password. */
@@ -40,6 +40,7 @@ val FONT_SIZES = 8..24
 
 class PocketViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = application.getSharedPreferences("pocket", 0)
+    val discovery = Discovery(application)
     private val keys = SshKeys(application.noBackupFilesDir)
     private val _state = MutableStateFlow(PocketState(nativeDisplay = prefs.getBoolean("native_display", false),
         fontSize = prefs.getInt("font_size", DEFAULT_FONT_SIZE).coerceIn(FONT_SIZES), hosts = runCatching {
@@ -85,7 +86,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         val previous = hosts.find { it.id == profile.id }
         val moved = previous != null && (previous.host != profile.host || previous.port != profile.port || previous.user != profile.user || previous.session != profile.session)
         val live = state.value.machines[profile.id]?.let { it.connected || it.connecting } == true
-        saveHosts(if (previous != null) hosts.map { if (it.id == profile.id) profile else it } else hosts + profile)
+        saveHosts(if (previous != null) hosts.map { if (it.id == profile.id) profile.copy(linked = if (moved) emptyList() else it.linked) else it } else hosts + profile)
         // A live connection to the old address would otherwise keep running under the new name.
         if (moved && live) connect(profile)
     }
@@ -203,14 +204,22 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         val list = client.call("terminal.list")
         val terminals = list.optJSONArray("terminals")?.objects()?.map(CoreTerminal::parse).orEmpty()
         val local = client.call("doc.get", JSONObject().put("name", "herdr-app"))
-        val spaces = LayoutReader.spaces(local.optJSONObject("value")).toMutableList()
+        val spaces = LayoutReader.spaces(local.optJSONObject("value"), terminals = terminals).toMutableList()
         for (machine in list.optJSONArray("machines")?.objects().orEmpty()) {
             if (machine.clean("state") != "connected") continue
             val name = machine.getString("name")
             runCatching { client.call("doc.get", JSONObject().put("name", "herdr-app").put("on", name)) }
-                .onSuccess { spaces.addAll(LayoutReader.spaces(it.optJSONObject("value"), name)) }
+                .onSuccess { spaces.addAll(LayoutReader.spaces(it.optJSONObject("value"), name, terminals)) }
         }
-        updateMachine(id) { it.copy(terminals = terminals, spaces = spaces, error = null) }
+        val linked = LinkedMachine.list(list, terminals)
+        updateMachine(id) { it.copy(terminals = terminals, spaces = spaces, linked = linked, error = null) }
+        rememberLinked(id, linked.map { it.name })
+    }
+    /** Saves which machines a core reaches, so the start screen lists them before the next connection. */
+    private fun rememberLinked(id: String, names: List<String>) {
+        val hosts = state.value.hosts
+        if (hosts.none { it.id == id && it.linked != names }) return
+        saveHosts(hosts.map { if (it.id == id) it.copy(linked = names) else it })
     }
 
     // Called only once the local terminal page has measured its actual viewport.
@@ -410,5 +419,5 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun leaveDemo() { detach(); _state.update { it.copy(demo = false, machines = emptyMap(), selected = null, space = null) } }
     fun hostName(hostId: String) = if (state.value.demo) "Preview machine" else state.value.hosts.find { it.id == hostId }?.name ?: "Machine"
-    override fun onCleared() { clients.values.forEach { it.close() }; clients.clear() }
+    override fun onCleared() { discovery.stop(); clients.values.forEach { it.close() }; clients.clear() }
 }
