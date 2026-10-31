@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,6 +29,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -77,7 +82,7 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
 
 @Composable fun Dot(color: Color, size: Int = 6) { Box(Modifier.size(size.dp).background(color, CircleShape)) }
 @Composable fun SmallLabel(text: String, modifier: Modifier = Modifier) {
-    Text(text.uppercase(), modifier, color = Muted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.5.sp)
+    Text(text.uppercase(), modifier, color = Muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.4.sp)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -87,7 +92,7 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     var addHost by remember { mutableStateOf(false) }
-    var connectHost by remember { mutableStateOf<HostProfile?>(null) }
+    var editHost by remember { mutableStateOf<HostProfile?>(null) }
     var newTerminal by remember { mutableStateOf(false) }
     val selected = state.selected
     val space = state.space?.let { (host, id) -> state.machines[host]?.spaces?.find { it.id == id } }
@@ -118,16 +123,16 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
             Spacer(Modifier.height(24.dp))
             Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically) {
                 SmallLabel("Spaces"); Spacer(Modifier.weight(1f))
-                Text("${state.machines.values.sumOf { it.spaces.size }}", fontSize = 11.sp, color = Muted)
+                Text("${state.machines.values.sumOf { it.spaces.size }}", fontSize = 12.sp, color = Muted)
             }
             Spacer(Modifier.height(12.dp))
             LazyColumn(Modifier.weight(1f)) {
                 state.machines.forEach { (hostId, machine) ->
-                    val hostName = if (state.demo) "Preview machine" else state.hosts.find { it.id == hostId }?.name ?: "Machine"
+                    val hostName = vm.hostName(hostId)
                     item {
                         Row(Modifier.padding(24.dp, 12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Dot(if (machine.connected) Color(0xffa6bd91) else Muted); Spacer(Modifier.width(8.dp))
-                            Text(hostName, color = Muted, fontSize = 11.sp)
+                            Text(hostName, color = Muted, fontSize = 12.sp)
                         }
                     }
                     items(machine.spaces, key = { "$hostId:${it.id}" }) { s ->
@@ -146,8 +151,8 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
             DrawerRow("Settings", Icons.Outlined.Settings, state.screen == "settings") { closeDrawer { vm.navigate("settings") } }
             Row(Modifier.fillMaxWidth().padding(24.dp, 20.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.Lock, null, Modifier.size(12.dp), tint = Muted); Spacer(Modifier.width(6.dp))
-                Text("herdr-core · SSH", fontSize = 11.sp, color = Muted)
-                Spacer(Modifier.weight(1f)); Text(BuildConfig.VERSION_NAME, color = Muted, fontSize = 10.sp)
+                Text("herdr-core · SSH", fontSize = 12.sp, color = Muted)
+                Spacer(Modifier.weight(1f)); Text(BuildConfig.VERSION_NAME, color = Muted, fontSize = 11.sp)
             }
         }
     }) {
@@ -162,7 +167,7 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
                         Column(Modifier.weight(1f)) {
                             Text(when { selected != null -> terminal?.title ?: selected.address; state.screen == "machines" -> "Machines"; state.screen == "settings" -> "Settings"; space != null -> space.name; else -> "Herdr" },
                                 fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            if (selected != null) Text(space?.name ?: "Terminal", fontSize = 10.sp, color = Muted)
+                            if (selected != null) Text(space?.name ?: "Terminal", fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         if (selected != null) IconButton(onClick = { vm.setTerminalFullscreen(true) }) { Icon(Icons.Outlined.Fullscreen, "Full screen terminal", tint = Accent) }
                         if (selected != null) IconButton(onClick = vm::backToList) { Icon(Icons.Outlined.Close, "Back to agents", tint = Muted) }
@@ -175,24 +180,27 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
                     }
                     HorizontalDivider(color = Border)
                     if (state.demo) Row(Modifier.fillMaxWidth().background(Accent.copy(alpha = .09f)).padding(start = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Interface preview · sample data", color = Accent, fontSize = 11.sp, modifier = Modifier.weight(1f))
-                        TextButton(onClick = vm::leaveDemo) { Text("Exit", fontSize = 11.sp) }
+                        Text("Interface preview · sample data", color = Accent, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                        TextButton(onClick = vm::leaveDemo) { Text("Exit", fontSize = 12.sp) }
                     }
                 }
             }) { padding ->
             Box(Modifier.fillMaxSize().padding(padding)) {
                 when {
                     selected != null -> TerminalScreen(vm, state, terminal, space) { scope.launch { drawer.open() } }
-                    state.screen == "machines" -> MachinesScreen(state, onAdd = { addHost = true }, onConnect = { connectHost = it }, onDisconnect = vm::disconnect, onRemove = vm::removeHost)
+                    state.screen == "machines" -> MachinesScreen(state, onAdd = { addHost = true }, onConnect = { vm.connect(it) }, onEdit = { editHost = it }, onDisconnect = vm::disconnect, onRemove = vm::removeHost)
                     state.screen == "settings" -> SettingsScreen(state, vm)
-                    state.machines.values.none { it.connected || it.terminals.isNotEmpty() } -> WelcomeScreen(onAdd = { if (state.hosts.isEmpty()) addHost = true else vm.navigate("machines") }, onPreview = vm::enterDemo)
-                    else -> OverviewScreen(state, space, vm::selectTerminal, onAll = vm::showAll)
+                    state.machines.values.none { it.connected || it.terminals.isNotEmpty() } -> WelcomeScreen(state, onAdd = { addHost = true }, onConnect = { vm.connect(it) }, onPreview = vm::enterDemo)
+                    else -> OverviewScreen(state, space, vm, onAll = vm::showAll)
                 }
             }
         }
     }
-    if (addHost) AddHostDialog(onDismiss = { addHost = false }, onSave = { vm.saveHost(it); addHost = false })
-    connectHost?.let { host -> ConnectDialog(host, onDismiss = { connectHost = null }, onConnect = { password -> vm.connect(host, password); connectHost = null }) }
+    if (addHost) HostDialog(null, onDismiss = { addHost = false }, onSave = { vm.saveHost(it); addHost = false; vm.connect(it) })
+    editHost?.let { host -> HostDialog(host, onDismiss = { editHost = null }, onSave = { vm.saveHost(it); editHost = null }) }
+    state.passwordPrompt?.let { prompt -> state.hosts.find { it.id == prompt.hostId }?.let { host ->
+        ConnectDialog(host, prompt.rejected, onDismiss = vm::dismissPasswordPrompt, onConnect = { password -> vm.connect(host, password) })
+    } }
     if (newTerminal) NewTerminalDialog(state, onDismiss = { newTerminal = false }) { host, cwd, command -> vm.startTerminal(host, cwd, command); newTerminal = false }
     state.trust?.let { challenge ->
         AlertDialog(onDismissRequest = vm::rejectHost, icon = { Icon(Icons.Outlined.Fingerprint, null, tint = Accent) },
@@ -200,8 +208,8 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
             text = { Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text("${challenge.profile.user}@${challenge.profile.host}:${challenge.profile.port}", color = Muted)
                 Text("Compare this fingerprint with your machine’s SSH host key before trusting it.")
-                SelectionContainer { Text(challenge.presented, fontFamily = FontFamily.Monospace, fontSize = 12.sp) }
-                if (challenge.profile.fingerprint.isNotBlank()) Text("Previously trusted: ${challenge.profile.fingerprint}", color = Blocked, fontSize = 11.sp)
+                SelectionContainer { Text(challenge.presented, fontFamily = FontFamily.Monospace, fontSize = 13.sp) }
+                if (challenge.profile.fingerprint.isNotBlank()) Text("Previously trusted: ${challenge.profile.fingerprint}", color = Blocked, fontSize = 12.sp)
             } }, confirmButton = { TextButton(onClick = vm::trustHost) { Text("Trust and connect") } }, dismissButton = { TextButton(onClick = vm::rejectHost) { Text("Cancel") } })
     }
 }
@@ -211,44 +219,92 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
         .background(if (selected) Accent.copy(alpha = .12f) else Color.Transparent).clickable(onClick = onClick).padding(12.dp, 13.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, Modifier.size(18.dp), tint = if (selected) Accent else Muted); Spacer(Modifier.width(12.dp))
-        Text(text, Modifier.weight(1f), color = if (selected) Accent else Ink, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        trailing?.let { Text(it, fontSize = 11.sp, color = if (selected) Accent else Muted) }
+        Text(text, Modifier.weight(1f), color = if (selected) Accent else Ink, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        trailing?.let { Text(it, fontSize = 12.sp, color = if (selected) Accent else Muted) }
     }
 }
 
-@Composable fun WelcomeScreen(onAdd: () -> Unit, onPreview: () -> Unit) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(32.dp), verticalArrangement = Arrangement.Center) {
-        Surface(color = Raised, shape = RoundedCornerShape(22.dp), modifier = Modifier.size(80.dp)) {
-            Box(contentAlignment = Alignment.Center) { Brand(50) }
+@Composable fun WelcomeScreen(state: PocketState, onAdd: () -> Unit, onConnect: (HostProfile) -> Unit, onPreview: () -> Unit) {
+    val returning = state.hosts.isNotEmpty()
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 28.dp, vertical = 32.dp), verticalArrangement = Arrangement.Center) {
+        Surface(color = Raised, shape = RoundedCornerShape(22.dp), modifier = Modifier.size(if (returning) 64.dp else 80.dp)) {
+            Box(contentAlignment = Alignment.Center) { Brand(if (returning) 40 else 50) }
         }
-        Spacer(Modifier.height(34.dp)); SmallLabel("Pick up where you left off")
-        Spacer(Modifier.height(16.dp)); Text("Your herd,\nin your pocket.", fontSize = 35.sp, lineHeight = 42.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-1).sp)
-        Spacer(Modifier.height(18.dp)); Text("The same agents. The same terminals.\nConnect to your machine and keep going.", color = Muted, fontSize = 15.sp, lineHeight = 24.sp)
-        Spacer(Modifier.height(36.dp))
-        Button(onClick = onAdd, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(12.dp)) {
-            Icon(Icons.Outlined.Add, null, Modifier.size(19.dp)); Spacer(Modifier.width(8.dp)); Text("Connect a machine", fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(if (returning) 26.dp else 34.dp)); SmallLabel("Pick up where you left off")
+        Spacer(Modifier.height(16.dp)); Text("Your herd,\nin your pocket.", fontSize = if (returning) 30.sp else 35.sp, lineHeight = if (returning) 36.sp else 42.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-1).sp)
+        if (returning) {
+            // Returning users get one-tap connect instead of a detour through Machines.
+            Spacer(Modifier.height(28.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                state.hosts.forEach { host -> QuickConnectRow(host, state.machines[host.id] ?: MachineState()) { onConnect(host) } }
+            }
+            TextButton(onClick = onAdd, modifier = Modifier.padding(top = 6.dp)) {
+                Icon(Icons.Outlined.Add, null, Modifier.size(17.dp)); Spacer(Modifier.width(6.dp)); Text("Add another machine")
+            }
+        } else {
+            Spacer(Modifier.height(18.dp)); Text("The same agents. The same terminals.\nConnect to your machine and keep going.", color = Muted, fontSize = 15.sp, lineHeight = 24.sp)
+            Spacer(Modifier.height(36.dp))
+            Button(onClick = onAdd, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(12.dp)) {
+                Icon(Icons.Outlined.Add, null, Modifier.size(19.dp)); Spacer(Modifier.width(8.dp)); Text("Connect a machine", fontWeight = FontWeight.SemiBold)
+            }
         }
-        TextButton(onClick = onPreview, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Explore the interface", color = Muted, fontSize = 12.sp) }
-        Spacer(Modifier.height(44.dp)); HorizontalDivider(color = Border); Spacer(Modifier.height(20.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Terminal, null, Modifier.size(16.dp), tint = Muted); Spacer(Modifier.width(10.dp)); Text("Connects to your existing herdr-core over SSH", color = Muted, fontSize = 11.sp) }
+        TextButton(onClick = onPreview, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Explore the interface", color = Muted, fontSize = 13.sp) }
+        Spacer(Modifier.height(36.dp)); HorizontalDivider(color = Border); Spacer(Modifier.height(20.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Terminal, null, Modifier.size(16.dp), tint = Muted); Spacer(Modifier.width(10.dp)); Text("Connects to your existing herdr-core over SSH", color = Muted, fontSize = 12.sp) }
     }
 }
 
-@Composable fun OverviewScreen(state: PocketState, space: PocketSpace?, onSelect: (TerminalRef) -> Unit, onAll: () -> Unit) {
+@Composable fun QuickConnectRow(host: HostProfile, machine: MachineState, onConnect: () -> Unit) {
+    Surface(shape = RoundedCornerShape(14.dp), color = Surface, border = BorderStroke(1.dp, Border),
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(enabled = !machine.connecting, onClick = onConnect)) {
+        Column(Modifier.padding(16.dp, 14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.Computer, null, Modifier.size(22.dp), tint = Accent); Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(host.name, fontWeight = FontWeight.Medium, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("${host.user}@${host.host}", fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Spacer(Modifier.width(8.dp))
+                if (machine.connecting) CircularProgressIndicator(Modifier.padding(horizontal = 18.dp).size(20.dp), strokeWidth = 2.dp)
+                else FilledTonalButton(onClick = onConnect) { Text("Connect") }
+            }
+            machine.error?.let { Spacer(Modifier.height(10.dp)); Text(it, color = Blocked, fontSize = 12.sp, lineHeight = 17.sp, maxLines = 3, overflow = TextOverflow.Ellipsis) }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable fun OverviewScreen(state: PocketState, space: PocketSpace?, vm: PocketViewModel, onAll: () -> Unit) {
     var search by remember { mutableStateOf("") }
     val all = state.machines.flatMap { (host, machine) -> machine.terminals.filter { it.live }.map { TerminalRef(host, it.address) to it } }
     val scoped = all.filter { (ref, _) -> state.space == null || (ref.hostId == state.space.first && ref.address in space?.addresses.orEmpty()) }
     val shown = scoped.filter { (_, t) -> search.isBlank() || "${t.title} ${t.agent} ${t.cwd} ${t.message}".contains(search, true) }
+    // Machines whose connection dropped or failed; their terminal list may be stale.
+    val offline = if (state.demo) emptyList() else state.hosts.filter { h -> state.machines[h.id]?.let { !it.connected && (it.connecting || it.error != null) } == true }
+    PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = vm::refreshAll, modifier = Modifier.fillMaxSize()) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp, 24.dp, 20.dp, 32.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        items(offline, key = { "offline:${it.id}" }) { host ->
+            val machine = state.machines[host.id] ?: MachineState()
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Blocked.copy(alpha = .1f)).border(1.dp, Blocked.copy(alpha = .3f), RoundedCornerShape(12.dp)).padding(start = 14.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Dot(if (machine.connecting) Working else Blocked, 7); Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f).padding(vertical = 10.dp)) {
+                    Text(if (machine.connecting) "Reconnecting to ${host.name}…" else "${host.name} is disconnected", fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (!machine.connecting) machine.error?.let { Text(it, fontSize = 11.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                }
+                if (machine.connecting) CircularProgressIndicator(Modifier.padding(14.dp).size(18.dp), strokeWidth = 2.dp)
+                else TextButton(onClick = { vm.reconnect(host.id) }) { Text("Reconnect") }
+            }
+        }
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 SmallLabel(if (space == null) "All machines" else space.folder.ifBlank { "Space" }, Modifier.weight(1f))
-                Row(verticalAlignment = Alignment.CenterVertically) { Dot(Color(0xffa6bd91)); Spacer(Modifier.width(6.dp)); Text("${state.machines.values.count { it.connected }} connected", color = Muted, fontSize = 10.sp) }
+                Row(verticalAlignment = Alignment.CenterVertically) { Dot(Color(0xffa6bd91)); Spacer(Modifier.width(6.dp)); Text("${state.machines.values.count { it.connected }} connected", color = Muted, fontSize = 12.sp) }
             }
             Spacer(Modifier.height(12.dp))
             Text(if (space == null) "Agents" else space.name, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-.7).sp)
             Spacer(Modifier.height(6.dp))
-            Text(if (scoped.any { it.second.attention }) "A little attention goes a long way." else "Everything you’re working on, in one place.", color = Muted, fontSize = 12.sp)
+            Text(if (scoped.any { it.second.attention }) "A little attention goes a long way." else "Everything you’re working on, in one place.", color = Muted, fontSize = 13.sp)
             Spacer(Modifier.height(24.dp))
             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Surface).border(1.dp, Border, RoundedCornerShape(12.dp)).padding(vertical = 17.dp)) {
                 Stat(scoped.count { it.second.attention }, "Needs you", Blocked, Modifier.weight(1f))
@@ -258,8 +314,11 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
                 Stat(scoped.count { it.second.status == "done" }, "Done", Done, Modifier.weight(1f))
             }
             Spacer(Modifier.height(18.dp))
-            OutlinedTextField(value = search, onValueChange = { search = it }, placeholder = { Text("Find an agent or terminal…", fontSize = 12.sp) },
+            val focus = LocalFocusManager.current
+            OutlinedTextField(value = search, onValueChange = { search = it }, placeholder = { Text("Find an agent or terminal…", fontSize = 14.sp) },
                 leadingIcon = { Icon(Icons.Outlined.Search, null, Modifier.size(18.dp)) }, singleLine = true, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth(),
+                trailingIcon = { if (search.isNotEmpty()) IconButton(onClick = { search = "" }) { Icon(Icons.Outlined.Close, "Clear search", Modifier.size(18.dp)) } },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { focus.clearFocus() }),
                 colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Border, focusedBorderColor = Accent, unfocusedContainerColor = Surface))
             Spacer(Modifier.height(8.dp))
         }
@@ -268,14 +327,14 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
         groups.filter { it.second.isNotEmpty() }.forEach { (title, terminals) ->
             item {
                 Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    SmallLabel(title); Spacer(Modifier.width(8.dp)); Text(terminals.size.toString(), color = Muted, fontSize = 10.sp)
+                    SmallLabel(title); Spacer(Modifier.width(8.dp)); Text(terminals.size.toString(), color = Muted, fontSize = 11.sp)
                 }
             }
             items(terminals, key = { "${it.first.hostId}:${it.first.address}" }) { (ref, terminal) ->
                 val machine = state.machines[ref.hostId]
                 val s = machine?.spaces?.find { ref.address in it.addresses }
                 val host = if (state.demo) "dev-machine" else state.hosts.find { it.id == ref.hostId }?.name.orEmpty()
-                TerminalCard(terminal, s?.name ?: host, ref.address) { onSelect(ref) }
+                TerminalCard(terminal, s?.name ?: host, ref.address) { vm.selectTerminal(ref) }
             }
         }
         if (shown.isEmpty()) item {
@@ -286,12 +345,13 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
             }
         }
     }
+    }
 }
 
 @Composable fun Stat(number: Int, text: String, color: Color, modifier: Modifier) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Text(number.toString(), color = color, fontSize = 24.sp, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.height(3.dp)); Text(text, fontSize = 10.sp, color = Muted)
+        Spacer(Modifier.height(3.dp)); Text(text, fontSize = 12.sp, color = Muted)
     }
 }
 
@@ -305,16 +365,16 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(t.agent, color = Muted, fontSize = 10.sp, maxLines = 1); Spacer(Modifier.weight(1f))
-                Dot(color, 5); Spacer(Modifier.width(5.dp)); Text(stateName(t.status), color = color, fontSize = 9.sp)
+                Text(t.agent, color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false)); Spacer(Modifier.weight(1f))
+                Dot(color, 6); Spacer(Modifier.width(6.dp)); Text(stateName(t.status), color = color, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             }
-            Spacer(Modifier.height(7.dp)); Text(t.title, fontWeight = FontWeight.Medium, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (t.message.isNotBlank()) { Spacer(Modifier.height(7.dp)); Text(t.message, color = Muted, fontSize = 11.sp, lineHeight = 17.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+            Spacer(Modifier.height(6.dp)); Text(t.title, fontWeight = FontWeight.Medium, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (t.message.isNotBlank()) { Spacer(Modifier.height(6.dp)); Text(t.message, color = Muted, fontSize = 13.sp, lineHeight = 19.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
             Spacer(Modifier.height(14.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.FolderOpen, null, Modifier.size(12.dp), tint = Muted); Spacer(Modifier.width(5.dp))
-                Text(location, color = Muted, fontSize = 10.sp, maxLines = 1, modifier = Modifier.weight(1f))
-                Text(address, color = Muted.copy(alpha = .6f), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                Text(location, color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Text(address, color = Muted.copy(alpha = .6f), fontSize = 11.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
                 Spacer(Modifier.width(5.dp)); Icon(Icons.Outlined.ChevronRight, null, Modifier.size(14.dp), tint = Muted)
             }
         }

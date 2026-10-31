@@ -6,13 +6,15 @@ This is an independent prototype, not an official Herdr release.
 
 ## What works
 
-- Save several Linux/macOS SSH hosts and connect with this phone's Ed25519 key or a password.
+- Save several Linux/macOS SSH hosts, edit them later, and connect with one tap from the start screen using this phone's Ed25519 key. If a host rejects the key, the app asks for its SSH password.
 - Verify a host's SHA-256 fingerprint before authenticating. Changed keys require a new decision.
 - See live agents and terminals, grouped by the status the program reports.
 - Read the desktop's `herdr-app` document to preserve space names, tab order and split membership, including machines forwarded by a core.
 - Open an agent directly into an immersive, full-screen terminal. Tap **…** to reveal navigation, tabs, the keyboard and message composer; Android Back returns to the agent list.
 - Swipe through terminal history, keep your place as new output arrives, and tap **↓ Latest** to follow live output again. Swipes in full-screen programs use their mouse/alternate-screen scrolling.
-- Type with the Android keyboard and use Esc, Tab, Ctrl+C, arrows, Page Up/Down and Enter keys. The key row appears with the keyboard or terminal controls.
+- Type with the Android keyboard and use the key row: Esc, sticky **Ctrl** and **Alt** (they apply to the next key or typed letter), Tab, Shift+Tab, arrows, Enter, Ctrl+C, Home/End, Page Up/Down, common symbols and Paste. Arrows and paging repeat while held. Cursor keys and paste follow the program's application-cursor and bracketed-paste modes. The key row appears with the keyboard or terminal controls.
+- Pinch a terminal with two fingers to change its text size, or set it in Settings. The size is remembered.
+- If a connection drops, the terminal and agent list show a **Reconnect** action; pull down on the agent list to refresh or retry.
 - Send a composed message through `terminal.send`, retaining the draft when a send is not confirmed.
 - Start a shell or command. From an existing space it creates a new tab visible in the desktop app through `herdr.space` / `herdr.tab` labels.
 - Switch terminals or close the app without stopping the remote program.
@@ -22,12 +24,14 @@ This is an independent prototype, not an official Herdr release.
 
 1. Install and run herdr-core on the host, or open Herdr desktop. `hc server status` should work. This client speaks protocol generation 1.
 2. Make SSH reachable from the phone, using your local network or Tailscale.
-3. Open **Herdr Pocket → Settings** and copy the public key. Add it as a line to the host user's `~/.ssh/authorized_keys`. Alternatively use SSH password authentication for a connection; the app doesn't save passwords.
-4. Open **Machines → Add machine**, enter the hostname, SSH user and port, and the core session name (`default` unless you chose another). Tap Connect.
+3. Open **Herdr Pocket → Settings** and copy the public key. Add it as a line to the host user's `~/.ssh/authorized_keys`. Alternatively use SSH password authentication: the app asks for the password when the host rejects the key, and doesn't save it.
+4. Tap **Connect a machine** (or **Machines → Add machine**), enter the hostname, SSH user and port, and the core session name (`default` unless you chose another). Tap **Save and connect**.
 5. Compare the fingerprint shown with your host's SSH public-key fingerprint before trusting it. For an Ed25519 SSH server key, run `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the host.
 6. Open the hamburger drawer to choose a space, or choose an agent from All agents.
 
 The app executes `hc connect` through an SSH exec channel. It also finds `herdr-core` and `~/.local/bin/hc` if the login PATH does not contain `hc`. No relay, web server or plugin is installed on the host. It does not connect to the older `herdr` TUI runtime.
+
+When you add a machine, the app saves it and connects straight away. Later, tap a saved machine on the start screen to connect.
 
 Tap **…** in the upper-right of a terminal to reveal its controls. The keyboard button focuses raw terminal input. The chat button opens the native message composer. A normal composed send respects the core's blocked-state protection; answer interactive prompts with the terminal keyboard/key bar.
 
@@ -59,7 +63,7 @@ Tests select unique core sessions and temporary XDG state/config/runtime directo
 - A phone attach can resize the same terminal shown on the desktop; herdr-core gives the last active viewer control of its size.
 - The phone's private key is stored in Android app-private, no-backup storage. Uninstalling loses it. This prototype does not offer key backup or hardware-backed SSH signing. Backups and device transfers of app data are disabled.
 
-Optional terminal regression checks: install Python Playwright and Chromium, then run `python scripts/test_terminal.py`. These cover zero-height parents, keyboard resizing/input, touch scrolling in history and alternate-screen programs, preserving scroll position on output, and returning to the latest output.
+Optional terminal regression checks: install Python Playwright and Chromium, then run `python scripts/test_terminal.py`. These cover zero-height parents, keyboard resizing/input, touch scrolling in history and alternate-screen programs, preserving scroll position on output, returning to the latest output, and pinch-to-resize text.
 
 The terminal assets are already bundled; Node is not needed for an Android build. To refresh those pinned assets, run `scripts/vendor-terminal.sh` with npm available. The script transpiles xterm for older Android WebViews.
 
@@ -71,6 +75,7 @@ The terminal assets are already bundled; Node is not needed for an Android build
 - `PocketViewModel.kt`: connections, inventory, selection, terminal lifecycle and ordered input.
 - `MainActivity.kt`, `Screens.kt`: native Compose UI and Graphite theme.
 - `TerminalScreen.kt`, `assets/terminal/`: offline terminal surface and native key/message controls.
+- `KeyInput.kt`, `TerminalModes.kt`: key-row modifiers, cursor-key and paste encoding, and the terminal modes they depend on.
 
 ## Attribution
 

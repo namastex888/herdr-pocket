@@ -17,7 +17,7 @@ try:
         page.on('pageerror', lambda error: failures.append(str(error)))
         paint = base64.b64encode(b'\x1b[2J\x1b[H\x1b[38;2;150;178;215mHerdr fixture\x1b[0m\r\nReady for input.').decode()
         page.add_init_script('''window.__keys=[];window.Pocket={
-          failed:m=>window.__error=m, painted:()=>{}, resized:()=>{},
+          failed:m=>window.__error=m, painted:()=>{}, resized:()=>{}, fontSize:n=>window.__font=n,
           input:b=>window.__keys.push(b),
           ready:()=>{window.__ready=true;window.resetTerminal(1);window.output(1,1,''' + json.dumps(paint) + ''')}
         };''')
@@ -80,9 +80,34 @@ try:
         }""")
         app_keys = b''.join(base64.b64decode(s) for s in page.evaluate('window.__keys'))
         assert b'\x1b[A' in app_keys, app_keys
+        # Two-finger pinch changes and reports the text size, without typing or scrolling.
+        page.evaluate("terminal.write('\\x1b[?1049l')")
+        before = page.evaluate('[terminal.options.fontSize, terminal.cols]')
+        page.evaluate("""() => {
+          window.__keys=[];
+          const target=document.querySelector('.xterm-screen');
+          const t=(id,x)=>new Touch({identifier:id,target,clientX:x,clientY:200,pageX:x,pageY:200});
+          target.dispatchEvent(new TouchEvent('touchstart',{bubbles:true,cancelable:true,touches:[t(1,150),t(2,250)]}));
+          target.dispatchEvent(new TouchEvent('touchmove',{bubbles:true,cancelable:true,touches:[t(1,100),t(2,300)]}));
+          target.dispatchEvent(new TouchEvent('touchend',{bubbles:true,cancelable:true,touches:[t(1,100)],changedTouches:[t(2,300)]}));
+          target.dispatchEvent(new TouchEvent('touchend',{bubbles:true,cancelable:true,touches:[],changedTouches:[t(1,100)]}));
+        }""")
+        page.wait_for_timeout(300)
+        after = page.evaluate('[terminal.options.fontSize, terminal.cols]')
+        assert after[0] == min(24, before[0] * 2) and after[1] < before[1], (before, after)
+        assert page.evaluate('window.__font') == after[0]
+        assert page.evaluate('window.__keys.length') == 0
+        page.evaluate('window.setFontSize(99)')
+        assert page.evaluate('terminal.options.fontSize') == 24
         assert not failures, failures
         assert not page.evaluate('window.__error || null')
+        # The app passes the saved text size in the page URL.
+        sized = browser.new_page(viewport={'width': 420, 'height': 640})
+        sized.add_init_script('window.Pocket={failed:()=>{},painted:()=>{},resized:()=>{},input:()=>{},fontSize:()=>{},ready:()=>{window.__ready=true}};')
+        sized.goto(f'http://127.0.0.1:{server.server_port}/index.html?font=17')
+        sized.wait_for_function('window.__ready === true')
+        assert sized.evaluate('terminal.options.fontSize') == 17
         browser.close()
-        print('PASS: paint, keyboard resize/input, touch history, hold position on output, latest, app mouse/alternate scrolling')
+        print('PASS: paint, keyboard resize/input, touch history, hold position on output, latest, app mouse/alternate scrolling, pinch text size')
 finally:
     server.shutdown()

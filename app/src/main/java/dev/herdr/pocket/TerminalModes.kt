@@ -1,10 +1,12 @@
 package dev.herdr.pocket
 
-/** Tracks only the VT modes needed by the plain-text fallback, across arbitrary frame boundaries. */
+/** Tracks only the VT modes the phone controls need (scrolling, cursor keys, paste), across arbitrary frame boundaries. */
 class TerminalModes {
     @Volatile var alternate = false; private set
     @Volatile var mouseTracking = false; private set
     @Volatile var sgrMouse = false; private set
+    @Volatile var applicationCursor = false; private set
+    @Volatile var bracketedPaste = false; private set
     private val mouseModes = mutableSetOf<Int>()
     private var phase = 0
     private val parameters = StringBuilder()
@@ -16,7 +18,7 @@ class TerminalModes {
             when (phase) {
                 1 -> {
                     phase = if (c == '[') 2 else 0
-                    if (c == 'c') { mouseModes.clear(); alternate = false; mouseTracking = false; sgrMouse = false }
+                    if (c == 'c') { mouseModes.clear(); alternate = false; mouseTracking = false; sgrMouse = false; applicationCursor = false; bracketedPaste = false }
                 }
                 2 -> {
                     if (c in '@'..'~') {
@@ -27,6 +29,8 @@ class TerminalModes {
                                     47, 1047, 1049 -> alternate = enabled
                                     1000, 1002, 1003 -> if (enabled) mouseModes.add(mode) else mouseModes.remove(mode)
                                     1006 -> sgrMouse = enabled
+                                    1 -> applicationCursor = enabled
+                                    2004 -> bracketedPaste = enabled
                                 }
                             }
                             mouseTracking = mouseModes.isNotEmpty()

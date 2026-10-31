@@ -13,22 +13,31 @@ import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
+// session increases with each successful connection, so open terminal views know to attach again.
 data class MachineState(val connecting: Boolean = false, val connected: Boolean = false, val version: String = "",
-    val terminals: List<CoreTerminal> = emptyList(), val spaces: List<PocketSpace> = emptyList(), val error: String? = null)
+    val terminals: List<CoreTerminal> = emptyList(), val spaces: List<PocketSpace> = emptyList(), val error: String? = null,
+    val session: Int = 0)
 data class TerminalRef(val hostId: String, val address: String)
+/** Asks for an SSH password after a host rejected this phone's key (or a previous password). */
+data class PasswordPrompt(val hostId: String, val rejected: Boolean)
 data class PocketState(
     val hosts: List<HostProfile> = emptyList(), val machines: Map<String, MachineState> = emptyMap(),
     val screen: String = "overview", val space: Pair<String, String>? = null, val selected: TerminalRef? = null,
     val publicKey: String = "", val trust: HostTrustRequired? = null, val message: String? = null,
     val terminalStatus: String = "", val demo: Boolean = false, val sending: Boolean = false,
     val nativeDisplay: Boolean = false, val screenText: String = "",
-    val terminalFullscreen: Boolean = true, val nativeAlternateScreen: Boolean = false
+    val terminalFullscreen: Boolean = true, val nativeAlternateScreen: Boolean = false,
+    val fontSize: Int = DEFAULT_FONT_SIZE, val modifiers: KeyModifiers = KeyModifiers(),
+    val refreshing: Boolean = false, val passwordPrompt: PasswordPrompt? = null
 )
+const val DEFAULT_FONT_SIZE = 13
+val FONT_SIZES = 8..24
 
 class PocketViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = application.getSharedPreferences("pocket", 0)
     private val keys = SshKeys(application.noBackupFilesDir)
-    private val _state = MutableStateFlow(PocketState(nativeDisplay = prefs.getBoolean("native_display", false), hosts = runCatching {
+    private val _state = MutableStateFlow(PocketState(nativeDisplay = prefs.getBoolean("native_display", false),
+        fontSize = prefs.getInt("font_size", DEFAULT_FONT_SIZE).coerceIn(FONT_SIZES), hosts = runCatching {
         JSONArray(prefs.getString("hosts", "[]")).objects().map(HostProfile::parse)
     }.getOrDefault(emptyList())))
     val state = _state.asStateFlow()
@@ -43,7 +52,8 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     @Volatile var resetTerminal: ((Long) -> Unit)? = null
     private var cols = 80
     private var rows = 24
-    @Volatile private var nativeModes = TerminalModes()
+    // Modes of the attached terminal's output stream, for key-bar cursor keys, paste and native scrolling.
+    @Volatile private var modes = TerminalModes()
     private val keystrokes = Channel<Pair<Pair<CoreClient, Int>, ByteArray>>(64)
 
     init {
@@ -66,8 +76,8 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun saveHost(profile: HostProfile) {
         if (state.value.demo) leaveDemo()
-        saveHosts(state.value.hosts.filter { it.id != profile.id } + profile)
-        _state.update { it.copy(screen = "machines") }
+        val hosts = state.value.hosts
+        saveHosts(if (hosts.any { it.id == profile.id }) hosts.map { if (it.id == profile.id) profile else it } else hosts + profile)
     }
     fun removeHost(id: String) {
         disconnect(id)
@@ -91,6 +101,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
 
     fun connect(profile: HostProfile, password: String? = null) {
         disconnect(profile.id)
+        _state.update { it.copy(passwordPrompt = null) }
         if (state.value.demo) leaveDemo()
         if (!password.isNullOrBlank()) temporaryPasswords[profile.id] = password
         jobs[profile.id] = viewModelScope.launch(Dispatchers.IO) {
@@ -110,7 +121,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
                 ensureActive()
                 clients[profile.id] = c
                 temporaryPasswords.remove(profile.id)
-                updateMachine(profile.id) { it.copy(connecting = false, connected = true, version = hello.optString("version"), error = null) }
+                updateMachine(profile.id) { it.copy(connecting = false, connected = true, version = hello.optString("version"), error = null, session = it.session + 1) }
                 val changes = Channel<Unit>(Channel.CONFLATED)
                 c.subscribe { changes.trySend(Unit) }
                 refresh(profile.id, c)
@@ -124,6 +135,12 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
                 var cause: Throwable? = e
                 while (cause != null && cause !is HostTrustRequired) cause = cause.cause
                 if (cause is HostTrustRequired) _state.update { it.copy(trust = cause as HostTrustRequired) }
+                else if (e.isAuthFailure()) {
+                    temporaryPasswords.remove(profile.id)
+                    val rejected = !password.isNullOrBlank()
+                    updateMachine(profile.id) { it.copy(error = if (rejected) "The host didn’t accept that password." else "The host didn’t accept this phone’s key.") }
+                    _state.update { it.copy(passwordPrompt = PasswordPrompt(profile.id, rejected)) }
+                }
                 else { temporaryPasswords.remove(profile.id); updateMachine(profile.id) { it.copy(error = e.message ?: "Connection failed") } }
                 updateMachine(profile.id) { it.copy(connecting = false, connected = false) }
             }
@@ -136,6 +153,29 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         _state.update { it.copy(trust = null) }
         connect(profile, temporaryPasswords[profile.id])
     }
+    fun dismissPasswordPrompt() { _state.update { it.copy(passwordPrompt = null) } }
+    fun reconnect(hostId: String) { state.value.hosts.find { it.id == hostId }?.let { connect(it) } }
+    /** Pull to refresh: reload connected inventories, and retry machines whose connection dropped or failed. */
+    fun refreshAll() {
+        if (state.value.refreshing) return
+        if (state.value.demo) { viewModelScope.launch { _state.update { it.copy(refreshing = true) }; delay(400); _state.update { it.copy(refreshing = false) } }; return }
+        _state.update { it.copy(refreshing = true) }
+        val retry = state.value.hosts.filter { h -> state.value.machines[h.id]?.let { !it.connected && !it.connecting && it.error != null } == true }
+        retry.forEach { connect(it) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val started = System.currentTimeMillis()
+            clients.entries.toList().map { (id, c) -> async { runCatching { refresh(id, c) }.onFailure { e -> updateMachine(id) { it.copy(error = e.message) } } } }.awaitAll()
+            delay((400 - (System.currentTimeMillis() - started)).coerceAtLeast(0))
+            _state.update { it.copy(refreshing = false) }
+        }
+    }
+    fun setFontSize(size: Int, persist: Boolean = true) {
+        val value = size.coerceIn(FONT_SIZES)
+        if (persist) prefs.edit().putInt("font_size", value).apply()
+        _state.update { it.copy(fontSize = value) }
+    }
+    fun toggleCtrl() { _state.update { it.copy(modifiers = it.modifiers.copy(ctrl = !it.modifiers.ctrl)) } }
+    fun toggleAlt() { _state.update { it.copy(modifiers = it.modifiers.copy(alt = !it.modifiers.alt)) } }
     fun rejectHost() { state.value.trust?.profile?.id?.let { temporaryPasswords.remove(it) }; _state.update { it.copy(trust = null) } }
     fun disconnect(id: String) {
         temporaryPasswords.remove(id)
@@ -179,12 +219,15 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         val client = clients[selected.hostId] ?: run { _state.update { it.copy(terminalStatus = "Connect this machine to open its terminal") }; return }
         val rev = ++attachRevision
         resetTerminal?.invoke(rev)
+        val streamModes = TerminalModes()
+        modes = streamModes
         attachJob = viewModelScope.launch(Dispatchers.IO) {
             activeChannel?.let { (old, channel) -> runCatching { old.detach(channel) } }; activeChannel = null
             var opened: Int? = null
             var streamEnded = false
             try {
                 val channel = client.attach(selected.address, cols, rows, { ch, bytes ->
+                    streamModes.feed(bytes)
                     if (attachRevision == rev) terminalBytes?.invoke(rev, ch, bytes)
                 }, { reason ->
                     streamEnded = true
@@ -226,7 +269,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         cols = columns.coerceIn(2, 500); rows = lines.coerceIn(2, 300)
         nativeJob = viewModelScope.launch(Dispatchers.IO) {
             val modes = TerminalModes()
-            nativeModes = modes
+            this@PocketViewModel.modes = modes
             val updates = Channel<Unit>(Channel.CONFLATED)
             var snapshotJob: Job? = null
             try {
@@ -272,19 +315,32 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         val c = clients[ref.hostId] ?: return
         viewModelScope.launch(Dispatchers.IO) { runCatching { c.send(channel, Wire.CREDIT, Wire.credit(bytes)) } }
     }
-    fun type(bytes: ByteArray) {
+    /** Sends input to the attached terminal. Typed keys consume any Ctrl/Alt armed on the key bar. */
+    fun type(bytes: ByteArray, modifiable: Boolean = true) {
         val pair = activeChannel ?: return
-        if (!keystrokes.trySend(pair to bytes).isSuccess) _state.update { it.copy(message = "Input queue is full. Wait for the connection to catch up.") }
+        val mods = state.value.modifiers
+        val modified = if (modifiable) KeyInput.modify(bytes, mods) else null
+        if (modified != null) _state.update { it.copy(modifiers = KeyModifiers()) }
+        if (!keystrokes.trySend(pair to (modified ?: bytes)).isSuccess) _state.update { it.copy(message = "Input queue is full. Wait for the connection to catch up.") }
+    }
+    /** A key-bar key: honors the program's cursor-key mode, then any armed modifiers. */
+    fun pressKey(bytes: ByteArray) {
+        type(if (state.value.modifiers.any) bytes else KeyInput.cursorKeys(bytes, modes.applicationCursor))
+    }
+    fun paste(text: String) {
+        if (text.isEmpty() || activeChannel == null) return
+        if (text.length > 256 * 1024) { _state.update { it.copy(message = "Clipboard is too large to paste into a terminal.") }; return }
+        type(KeyInput.paste(text, modes.bracketedPaste), modifiable = false)
     }
     // Native snapshots have local shell history. Only alternate-screen apps receive scroll keys.
     fun scrollNative(lines: Int) {
         if (!state.value.nativeAlternateScreen || lines == 0) return
-        val modes = nativeModes
-        if (modes.mouseTracking && modes.sgrMouse) {
+        val current = modes
+        if (current.mouseTracking && current.sgrMouse) {
             val button = if (lines < 0) 64 else 65
-            repeat(kotlin.math.abs(lines).coerceAtMost(12)) { type("\u001b[<$button;${(cols / 2).coerceAtLeast(1)};${(rows / 2).coerceAtLeast(1)}M".toByteArray()) }
+            repeat(kotlin.math.abs(lines).coerceAtMost(12)) { type("\u001b[<$button;${(cols / 2).coerceAtLeast(1)};${(rows / 2).coerceAtLeast(1)}M".toByteArray(), modifiable = false) }
         } else {
-            type((if (lines < 0) "\u001b[5~" else "\u001b[6~").toByteArray())
+            type((if (lines < 0) "\u001b[5~" else "\u001b[6~").toByteArray(), modifiable = false)
         }
     }
     fun sendMessage(text: String, confirmed: () -> Unit = {}) {
@@ -322,6 +378,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun detach() {
         ++attachRevision; attachJob = null
+        if (state.value.modifiers.any) _state.update { it.copy(modifiers = KeyModifiers()) }
         nativeJob?.cancel(); nativeJob = null
         val previous = activeChannel; activeChannel = null
         if (previous != null) viewModelScope.launch(Dispatchers.IO) { runCatching { previous.first.detach(previous.second) } }
@@ -340,5 +397,6 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
             machines = mapOf(id to MachineState(connected = true, version = "preview", terminals = terminals, spaces = spaces))) }
     }
     fun leaveDemo() { detach(); _state.update { it.copy(demo = false, machines = emptyMap(), selected = null, space = null) } }
+    fun hostName(hostId: String) = if (state.value.demo) "Preview machine" else state.value.hosts.find { it.id == hostId }?.name ?: "Machine"
     override fun onCleared() { clients.values.forEach { it.close() }; clients.clear() }
 }
