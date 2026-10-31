@@ -33,7 +33,11 @@ data class PocketState(
     val nativeDisplay: Boolean = false, val screenText: String = "",
     val terminalFullscreen: Boolean = true, val nativeAlternateScreen: Boolean = false,
     val fontSize: Int = DEFAULT_FONT_SIZE, val modifiers: KeyModifiers = KeyModifiers(),
-    val refreshing: Boolean = false, val passwordPrompt: PasswordPrompt? = null
+    val refreshing: Boolean = false, val passwordPrompt: PasswordPrompt? = null,
+    /** A Pocket Link pairing is in progress. */
+    val pairing: Boolean = false,
+    /** A pairing link that arrived from outside the app, waiting for the person to confirm it. */
+    val offeredPairing: PairingLink? = null
 )
 const val DEFAULT_FONT_SIZE = 13
 val FONT_SIZES = 8..24
@@ -119,13 +123,15 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
             updateMachine(profile.id) { it.copy(connecting = true, connected = false, error = null, needsPassword = false) }
             var client: CoreClient? = null
             try {
-                val transport = keys.open(profile, password)
-                ensureActive()
                 val connectionScope = CoroutineScope(coroutineContext + SupervisorJob(coroutineContext[Job]))
-                val c = CoreClient(transport.input, transport.output, transport, connectionScope) { reason ->
-                    clients.remove(profile.id)
-                    updateMachine(profile.id) { it.copy(connected = false, connecting = false, error = "Disconnected: $reason") }
-                    if (state.value.selected?.hostId == profile.id) _state.update { it.copy(terminalStatus = "Disconnected") }
+                val c = if (profile.paired) {
+                    val t = IrohLink.open(getApplication(), profile.ticket, profile.session, connectionScope)
+                    ensureActive()
+                    CoreClient(t.input, t.output, t, connectionScope) { reason -> lost(profile, reason) }
+                } else {
+                    val t = keys.open(profile, password)
+                    ensureActive()
+                    CoreClient(t.input, t.output, t, connectionScope) { reason -> lost(profile, reason) }
                 }
                 client = c
                 val hello = c.start()
@@ -158,6 +164,46 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
     }
+    private fun lost(profile: HostProfile, reason: String) {
+        clients.remove(profile.id)
+        updateMachine(profile.id) { it.copy(connected = false, connecting = false, error = "Disconnected: $reason") }
+        if (state.value.selected?.hostId == profile.id) _state.update { it.copy(terminalStatus = "Disconnected") }
+    }
+
+    fun offerPairing(text: String) {
+        val link = PairingLink.parse(text) ?: run { _state.update { it.copy(message = "That isn’t a Pocket Link pairing link.") }; return }
+        _state.update { it.copy(offeredPairing = link) }
+    }
+    fun dismissOfferedPairing() { _state.update { it.copy(offeredPairing = null) } }
+
+    /** Pairs with the desktop that showed [text] (a Pocket Link QR or pasted link), saves it and connects. */
+    fun pair(text: String) {
+        pair(PairingLink.parse(text) ?: run { _state.update { it.copy(message = "That isn’t a Pocket Link pairing link.") }; return })
+    }
+    fun pair(link: PairingLink) {
+        if (state.value.demo) leaveDemo()
+        _state.update { it.copy(pairing = true, offeredPairing = null) }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val device = listOf(android.os.Build.MANUFACTURER, android.os.Build.MODEL).distinct().joinToString(" ").trim().ifBlank { "Android phone" }
+                val name = IrohLink.pair(getApplication(), link, device)
+                val desktop = IrohLink.desktopId(link.ticket)
+                // Pairing the same desktop again keeps its card and history, with the new ticket.
+                val previous = state.value.hosts.find { it.paired && runCatching { IrohLink.desktopId(it.ticket) }.getOrNull() == desktop }
+                val profile = (previous ?: HostProfile(UUID.randomUUID().toString(), name, desktop.take(12), "", 0, transport = "iroh"))
+                    .copy(ticket = link.ticket, transport = "iroh")
+                withContext(Dispatchers.Main) {
+                    saveHost(profile)
+                    _state.update { it.copy(pairing = false, message = "Paired with $name") }
+                    connect(profile)
+                }
+            } catch (e: Throwable) {
+                if (e is CancellationException) throw e
+                _state.update { it.copy(pairing = false, message = e.message ?: "Pairing failed") }
+            }
+        }
+    }
+
     fun trustHost() {
         val challenge = state.value.trust ?: return
         val profile = challenge.profile.copy(fingerprint = challenge.presented)

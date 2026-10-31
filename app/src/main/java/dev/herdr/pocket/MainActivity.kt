@@ -3,11 +3,16 @@ package dev.herdr.pocket
 import android.os.Bundle
 import androidx.activity.compose.LocalActivity
 import androidx.compose.ui.platform.LocalView
+import androidx.activity.compose.rememberLauncherForActivityResult
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
+import android.content.Intent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
@@ -58,8 +63,10 @@ val Blocked = Color(0xfff0705f)
 val Done = Color(0xff76a8ff)
 
 class MainActivity : ComponentActivity() {
+    private val vm: PocketViewModel by viewModels()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) openLink(intent)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(0xff101114.toInt())
@@ -68,9 +75,16 @@ class MainActivity : ComponentActivity() {
             MaterialTheme(colorScheme = darkColorScheme(primary = Accent, onPrimary = Chrome, background = Canvas,
                 onBackground = Ink, surface = Surface, onSurface = Ink, surfaceVariant = Raised,
                 onSurfaceVariant = Muted, outline = Border, secondary = Accent, error = Blocked)) {
-                PocketApp()
+                PocketApp(vm)
             }
         }
+    }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); openLink(intent) }
+    // A pairing link from outside the app is only offered: the person confirms it in the app.
+    private fun openLink(intent: Intent?) {
+        val link = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.dataString ?: return
+        vm.offerPairing(link)
+        setIntent(Intent(this, MainActivity::class.java))
     }
 }
 
@@ -92,6 +106,12 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     var addHost by remember { mutableStateOf(false) }
+    var pairDesktop by remember { mutableStateOf(false) }
+    // Pocket Link's QR code; a cancelled scan returns no contents.
+    val scanner = rememberLauncherForActivityResult(ScanContract()) { result -> result.contents?.let(vm::pair) }
+    // The pairing dialog closes once a pairing it started finishes (the outcome shows as a message).
+    var wasPairing by remember { mutableStateOf(false) }
+    LaunchedEffect(state.pairing) { if (wasPairing && !state.pairing) pairDesktop = false; wasPairing = state.pairing }
     var addPrefill by remember { mutableStateOf<HostProfile?>(null) }
     var editHost by remember { mutableStateOf<HostProfile?>(null) }
     var newTerminal by remember { mutableStateOf(false) }
@@ -195,14 +215,16 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
             Box(Modifier.fillMaxSize().padding(padding)) {
                 when {
                     selected != null -> TerminalScreen(vm, state, terminal, space) { scope.launch { drawer.open() } }
-                    state.screen == "machines" -> MachinesScreen(state, nearby, onAdd = { addHost = true }, onAddNearby = ::addNearby, onConnect = { vm.connect(it) }, onEdit = { editHost = it }, onDisconnect = vm::disconnect, onRemove = vm::removeHost)
+                    state.screen == "machines" -> MachinesScreen(state, nearby, onAdd = { addHost = true }, onPair = { pairDesktop = true }, onAddNearby = ::addNearby, onConnect = { vm.connect(it) }, onEdit = { editHost = it }, onDisconnect = vm::disconnect, onRemove = vm::removeHost)
                     state.screen == "settings" -> SettingsScreen(state, vm)
-                    state.machines.values.none { it.connected || it.terminals.isNotEmpty() } -> WelcomeScreen(state, nearby, onAdd = { addHost = true }, onAddNearby = ::addNearby, onConnect = { vm.connect(it) }, onPreview = vm::enterDemo)
+                    state.machines.values.none { it.connected || it.terminals.isNotEmpty() } -> WelcomeScreen(state, nearby, onAdd = { addHost = true }, onPair = { pairDesktop = true }, onAddNearby = ::addNearby, onConnect = { vm.connect(it) }, onPreview = vm::enterDemo)
                     else -> OverviewScreen(state, space, vm, onAll = vm::showAll)
                 }
             }
         }
     }
+    if (pairDesktop) PairDialog(state.pairing, onDismiss = { pairDesktop = false }, onScan = { scanner.launch(ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE).setPrompt("Scan the code in Pocket Link").setBeepEnabled(false).setOrientationLocked(false)) }, onPair = vm::pair)
+    state.offeredPairing?.let { link -> ConfirmPairDialog(link, onPair = { vm.pair(link) }, onCancel = vm::dismissOfferedPairing) }
     if (addHost) HostDialog(null, onDismiss = { addHost = false; addPrefill = null }, onSave = { vm.saveHost(it); addHost = false; addPrefill = null; vm.connect(it) }, prefill = addPrefill)
     editHost?.let { host -> HostDialog(host, onDismiss = { editHost = null }, onSave = { vm.saveHost(it); editHost = null }) }
     state.passwordPrompt?.let { prompt -> state.hosts.find { it.id == prompt.hostId }?.let { host ->
@@ -231,7 +253,7 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
     }
 }
 
-@Composable fun WelcomeScreen(state: PocketState, nearby: List<NearbyHost>, onAdd: () -> Unit, onAddNearby: (NearbyHost) -> Unit, onConnect: (HostProfile) -> Unit, onPreview: () -> Unit) {
+@Composable fun WelcomeScreen(state: PocketState, nearby: List<NearbyHost>, onAdd: () -> Unit, onPair: () -> Unit, onAddNearby: (NearbyHost) -> Unit, onConnect: (HostProfile) -> Unit, onPreview: () -> Unit) {
     val returning = state.hosts.isNotEmpty()
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 28.dp, vertical = 32.dp), verticalArrangement = Arrangement.Center) {
         Surface(color = Raised, shape = RoundedCornerShape(22.dp), modifier = Modifier.size(if (returning) 64.dp else 80.dp)) {
@@ -245,20 +267,24 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 state.hosts.forEach { host -> QuickConnectRow(host, state.machines[host.id] ?: MachineState(), state.linkedFor(host)) { onConnect(host) } }
             }
-            TextButton(onClick = onAdd, modifier = Modifier.padding(top = 6.dp)) {
-                Icon(Icons.Outlined.Add, null, Modifier.size(17.dp)); Spacer(Modifier.width(6.dp)); Text("Add another machine")
+            Row(Modifier.padding(top = 6.dp)) {
+                TextButton(onClick = onPair) { Icon(Icons.Outlined.QrCodeScanner, null, Modifier.size(17.dp)); Spacer(Modifier.width(6.dp)); Text("Pair a desktop") }
+                TextButton(onClick = onAdd) { Icon(Icons.Outlined.Add, null, Modifier.size(17.dp)); Spacer(Modifier.width(6.dp)); Text("SSH machine") }
             }
         } else {
             Spacer(Modifier.height(18.dp)); Text("The same agents. The same terminals.\nConnect to your machine and keep going.", color = Muted, fontSize = 15.sp, lineHeight = 24.sp)
             Spacer(Modifier.height(36.dp))
-            Button(onClick = onAdd, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(12.dp)) {
-                Icon(Icons.Outlined.Add, null, Modifier.size(19.dp)); Spacer(Modifier.width(8.dp)); Text("Connect a machine", fontWeight = FontWeight.SemiBold)
+            Button(onClick = onPair, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(12.dp)) {
+                Icon(Icons.Outlined.QrCodeScanner, null, Modifier.size(19.dp)); Spacer(Modifier.width(8.dp)); Text("Pair with Herdr desktop", fontWeight = FontWeight.SemiBold)
+            }
+            OutlinedButton(onClick = onAdd, modifier = Modifier.fillMaxWidth().padding(top = 10.dp).height(48.dp), shape = RoundedCornerShape(12.dp)) {
+                Icon(Icons.Outlined.Terminal, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Connect over SSH")
             }
         }
         if (nearby.isNotEmpty()) { Spacer(Modifier.height(24.dp)); NearbySection(nearby, onAddNearby) }
         TextButton(onClick = onPreview, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Explore the interface", color = Muted, fontSize = 13.sp) }
         Spacer(Modifier.height(36.dp)); HorizontalDivider(color = Border); Spacer(Modifier.height(20.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Terminal, null, Modifier.size(16.dp), tint = Muted); Spacer(Modifier.width(10.dp)); Text("Connects to your existing herdr-core over SSH", color = Muted, fontSize = 12.sp) }
+        Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Terminal, null, Modifier.size(16.dp), tint = Muted); Spacer(Modifier.width(10.dp)); Text("Connects to your existing herdr-core, paired or over SSH", color = Muted, fontSize = 12.sp) }
     }
 }
 
@@ -270,7 +296,7 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
                 Icon(Icons.Outlined.Computer, null, Modifier.size(22.dp), tint = Accent); Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(host.name, fontWeight = FontWeight.Medium, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("${host.user}@${host.host}", fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(host.address, fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Spacer(Modifier.width(8.dp))
                 if (machine.connecting) CircularProgressIndicator(Modifier.padding(horizontal = 18.dp).size(20.dp), strokeWidth = 2.dp)
