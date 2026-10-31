@@ -7,13 +7,29 @@ import java.nio.ByteOrder
 
 data class HostProfile(
     val id: String, val name: String, val host: String, val user: String,
-    val port: Int = 22, val session: String = "default", val fingerprint: String = ""
+    val port: Int = 22, val session: String = "default", val fingerprint: String = "",
+    /** Machines this host's core reaches, remembered so they show before the next connection. */
+    val linked: List<String> = emptyList()
 ) {
     fun json() = JSONObject().put("id", id).put("name", name).put("host", host)
         .put("user", user).put("port", port).put("session", session).put("fingerprint", fingerprint)
+        .put("linked", JSONArray(linked))
     companion object {
         fun parse(j: JSONObject) = HostProfile(j.getString("id"), j.getString("name"), j.getString("host"),
-            j.getString("user"), j.optInt("port", 22), j.optString("session", "default"), j.optString("fingerprint"))
+            j.getString("user"), j.optInt("port", 22), j.optString("session", "default"), j.optString("fingerprint"),
+            j.optJSONArray("linked")?.let { a -> (0 until a.length()).mapNotNull { a.optString(it).ifBlank { null } } }.orEmpty())
+    }
+}
+
+/** A machine another core connects to, as listed by terminal.list; its terminals are addressed "name/tN". */
+data class LinkedMachine(val name: String, val state: String, val terminals: Int = 0) {
+    val connected get() = state == "connected"
+    companion object {
+        fun list(response: JSONObject, terminals: List<CoreTerminal>): List<LinkedMachine> =
+            response.optJSONArray("machines")?.objects().orEmpty().mapNotNull { m ->
+                val name = m.clean("name").ifBlank { return@mapNotNull null }
+                LinkedMachine(name, m.clean("state"), terminals.count { it.address.startsWith("$name/") })
+            }
     }
 }
 
@@ -48,7 +64,15 @@ data class PocketSpace(val id: String, val name: String, val folder: String, val
 }
 
 object LayoutReader {
-    fun spaces(document: JSONObject?, machine: String = ""): List<PocketSpace> {
+    /** A folder's display name as the desktop gives it: "~" at home, else its last segment. */
+    fun folderName(path: String): String {
+        val p = path.trimEnd('/')
+        return if (p.isEmpty() || HOME.matches(p)) "~" else p.substringAfterLast('/')
+    }
+    private val HOME = Regex("/(Users|home)/[^/]+|/root|~")
+
+    /** [terminals] name a space nobody named after where its first terminal is now, like the desktop. */
+    fun spaces(document: JSONObject?, machine: String = "", terminals: List<CoreTerminal> = emptyList()): List<PocketSpace> {
         fun qualify(s: String) = if (machine.isBlank()) s else "$machine/$s"
         return document?.optJSONArray("spaces")?.objects()?.map { s ->
             val tabs = s.optJSONArray("tabs")?.objects()?.map { t ->
@@ -63,8 +87,10 @@ object LayoutReader {
                 t.optJSONObject("root")?.let(::walk)
                 PocketTab(qualify(t.getString("id")), t.clean("name"), addresses.distinct())
             }.orEmpty()
-            PocketSpace(qualify(s.getString("id")), s.clean("name").ifBlank { s.clean("folder").trimEnd('/').substringAfterLast('/').ifBlank { "Untitled space" } },
-                s.clean("folder"), machine, tabs)
+            val first = tabs.firstNotNullOfOrNull { t -> t.terminals.firstOrNull() }?.let { a -> terminals.find { it.address == a } }
+            val name = s.clean("name").ifBlank { first?.cwd?.takeIf { it.isNotBlank() }?.let(::folderName).orEmpty() }
+                .ifBlank { s.clean("folder").takeIf { it.isNotBlank() }?.let(::folderName).orEmpty() }.ifBlank { "Untitled space" }
+            PocketSpace(qualify(s.getString("id")), name, s.clean("folder"), machine, tabs)
         }.orEmpty()
     }
 }

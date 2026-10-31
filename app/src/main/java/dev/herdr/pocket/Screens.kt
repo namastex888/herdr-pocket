@@ -14,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -32,7 +33,48 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.util.UUID
 
-@Composable fun MachinesScreen(state: PocketState, onAdd: () -> Unit, onConnect: (HostProfile) -> Unit, onEdit: (HostProfile) -> Unit, onDisconnect: (String) -> Unit, onRemove: (String) -> Unit) {
+/** Machines a host's core reaches: live from the connection, or remembered from the last one. */
+fun PocketState.linkedFor(host: HostProfile): List<LinkedMachine> =
+    machines[host.id]?.linked?.takeIf { it.isNotEmpty() } ?: host.linked.map { LinkedMachine(it, "") }
+
+@Composable fun LinkedMachineRows(linked: List<LinkedMachine>, via: String) {
+    if (linked.isEmpty()) return
+    Column(Modifier.padding(top = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SmallLabel("Through $via")
+        linked.forEach { m ->
+            Row(Modifier.padding(start = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Dot(if (m.connected) Color(0xffa6bd91) else Muted); Spacer(Modifier.width(10.dp))
+                Text(m.name, fontSize = 13.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(when { m.state.isBlank() -> "Connect to see status"; m.connected -> if (m.terminals == 1) "1 terminal" else "${m.terminals} terminals"; else -> m.state.replaceFirstChar(Char::uppercase) },
+                    fontSize = 12.sp, color = Muted)
+            }
+        }
+    }
+}
+
+@Composable fun NearbySection(nearby: List<NearbyHost>, onPick: (NearbyHost) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SmallLabel("On this network")
+        if (nearby.isEmpty()) Text("Looking for computers with SSH turned on…", fontSize = 12.sp, color = Muted)
+        nearby.forEach { n ->
+            Surface(shape = RoundedCornerShape(14.dp), color = Surface, border = BorderStroke(1.dp, Border),
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { onPick(n) }) {
+                Row(Modifier.padding(16.dp, 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Wifi, null, Modifier.size(20.dp), tint = Muted); Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(n.name, fontWeight = FontWeight.Medium, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(if (n.port == 22) n.host else "${n.host}:${n.port}", fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Text("Add", color = Accent, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+        }
+    }
+}
+
+fun NearbyHost.prefill() = HostProfile("", name, host, "", port)
+
+@Composable fun MachinesScreen(state: PocketState, nearby: List<NearbyHost>, onAdd: () -> Unit, onAddNearby: (NearbyHost) -> Unit, onConnect: (HostProfile) -> Unit, onEdit: (HostProfile) -> Unit, onDisconnect: (String) -> Unit, onRemove: (String) -> Unit) {
     var remove by remember { mutableStateOf<HostProfile?>(null) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item { Text("Your work lives here.", fontSize = 26.sp, fontWeight = FontWeight.SemiBold); Spacer(Modifier.height(10.dp)); Text("Connect to the machine running herdr-core. Use its local address or Tailscale hostname.", fontSize = 13.sp, lineHeight = 21.sp, color = Muted); Spacer(Modifier.height(12.dp)) }
@@ -51,6 +93,7 @@ import java.util.UUID
                     Spacer(Modifier.height(18.dp))
                     Text(if (machine.connected) "Connected · hc ${machine.version} · ${machine.terminals.size} terminals" else if (machine.connecting) "Connecting…" else "Not connected", fontSize = 12.sp, color = Muted)
                     machine.error?.let { Spacer(Modifier.height(10.dp)); SelectionContainer { Text(it, color = Blocked, fontSize = 12.sp, lineHeight = 18.sp) } }
+                    LinkedMachineRows(state.linkedFor(host), host.name)
                     Spacer(Modifier.height(10.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (machine.connected) OutlinedButton(onClick = { onDisconnect(host.id) }) { Text("Disconnect", fontSize = 13.sp) }
@@ -65,6 +108,7 @@ import java.util.UUID
             }
         }
         item { OutlinedButton(onClick = onAdd, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(12.dp)) { Icon(Icons.Outlined.Add, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Add machine") } }
+        item { Spacer(Modifier.height(6.dp)); NearbySection(nearby, onAddNearby) }
         item {
             Spacer(Modifier.height(10.dp)); SmallLabel("First connection")
             Spacer(Modifier.height(12.dp)); Text("Add this phone’s public key to ~/.ssh/authorized_keys on your machine. You can copy the key from Settings. If the host doesn’t accept the key, you’ll be asked for its SSH password.", fontSize = 13.sp, lineHeight = 20.sp, color = Muted)
@@ -121,10 +165,14 @@ import java.util.UUID
 fun plainKeys(type: KeyboardType = KeyboardType.Text, ime: ImeAction = ImeAction.Next) =
     KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, keyboardType = type, imeAction = ime)
 
-@Composable fun HostDialog(initial: HostProfile?, onDismiss: () -> Unit, onSave: (HostProfile) -> Unit) {
-    var name by remember { mutableStateOf(initial?.name.orEmpty()) }; var host by remember { mutableStateOf(initial?.host.orEmpty()) }
-    var user by remember { mutableStateOf(initial?.user.orEmpty()) }; var port by remember { mutableStateOf((initial?.port ?: 22).toString()) }
-    var session by remember { mutableStateOf(initial?.session ?: "default") }; var error by remember { mutableStateOf<String?>(null) }
+/** [initial] edits a saved machine; [prefill] only seeds the fields of a new one. */
+@Composable fun HostDialog(initial: HostProfile?, onDismiss: () -> Unit, onSave: (HostProfile) -> Unit, prefill: HostProfile? = null) {
+    val seed = initial ?: prefill
+    var name by remember { mutableStateOf(seed?.name.orEmpty()) }; var host by remember { mutableStateOf(seed?.host.orEmpty()) }
+    var user by remember { mutableStateOf(seed?.user.orEmpty()) }; var port by remember { mutableStateOf((seed?.port ?: 22).toString()) }
+    var session by remember { mutableStateOf(seed?.session ?: "default") }; var error by remember { mutableStateOf<String?>(null) }
+    val userFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { if (initial == null && prefill != null) runCatching { userFocus.requestFocus() } }
     // A different address may be a different machine, so its host key must be verified again.
     val keepsKey = initial != null && initial.host == host.trim() && initial.port == port.toIntOrNull()
     fun save() {
@@ -134,7 +182,7 @@ fun plainKeys(type: KeyboardType = KeyboardType.Text, ime: ImeAction = ImeAction
             port.toIntOrNull() !in 1..65535 -> error = "Enter a port between 1 and 65535."
             session.isBlank() -> error = "Enter the core session name (usually default)."
             else -> onSave(HostProfile(initial?.id ?: UUID.randomUUID().toString(), name.trim().ifBlank { host.trim() }, host.trim(), user.trim(),
-                port.toInt(), session.trim(), if (keepsKey) initial?.fingerprint.orEmpty() else ""))
+                port.toInt(), session.trim(), if (keepsKey) initial?.fingerprint.orEmpty() else "", initial?.linked.orEmpty()))
         }
     }
     AlertDialog(onDismissRequest = onDismiss, title = { Text(if (initial == null) "Add a machine" else "Edit ${initial.name}") }, text = {
@@ -143,7 +191,7 @@ fun plainKeys(type: KeyboardType = KeyboardType.Text, ime: ImeAction = ImeAction
             OutlinedTextField(name, { name = it }, label = { Text("Name") }, placeholder = { Text("My workstation") }, singleLine = true,
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next))
             OutlinedTextField(host, { host = it; error = null }, label = { Text("Hostname or IP") }, placeholder = { Text("workstation.tailnet.ts.net") }, singleLine = true, keyboardOptions = plainKeys(KeyboardType.Uri))
-            OutlinedTextField(user, { user = it; error = null }, label = { Text("SSH username") }, singleLine = true, keyboardOptions = plainKeys())
+            OutlinedTextField(user, { user = it; error = null }, label = { Text("SSH username") }, singleLine = true, keyboardOptions = plainKeys(), modifier = Modifier.focusRequester(userFocus))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(port, { port = it.filter(Char::isDigit).take(5); error = null }, label = { Text("Port") }, singleLine = true, modifier = Modifier.weight(.4f), keyboardOptions = plainKeys(KeyboardType.Number))
                 OutlinedTextField(session, { session = it; error = null }, label = { Text("Core session") }, singleLine = true, modifier = Modifier.weight(.6f),

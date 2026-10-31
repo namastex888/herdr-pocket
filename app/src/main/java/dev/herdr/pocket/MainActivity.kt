@@ -92,6 +92,7 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     var addHost by remember { mutableStateOf(false) }
+    var addPrefill by remember { mutableStateOf<HostProfile?>(null) }
     var editHost by remember { mutableStateOf<HostProfile?>(null) }
     var newTerminal by remember { mutableStateOf(false) }
     val selected = state.selected
@@ -107,6 +108,12 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
         else bars?.show(WindowInsetsCompat.Type.systemBars())
         onDispose { bars?.show(WindowInsetsCompat.Type.systemBars()) }
     }
+    val welcome = selected == null && state.screen == "overview" && state.machines.values.none { it.connected || it.terminals.isNotEmpty() }
+    val browsing = !state.demo && (welcome || (selected == null && state.screen == "machines"))
+    DisposableEffect(browsing) { if (browsing) vm.discovery.start(); onDispose { vm.discovery.stop() } }
+    val discovered by vm.discovery.hosts.collectAsStateWithLifecycle()
+    val nearby = (listOfNotNull(Discovery.emulatorHost) + discovered).filter { n -> state.hosts.none { it.host == n.host && it.port == n.port } }
+    fun addNearby(n: NearbyHost) { addPrefill = n.prefill(); addHost = true }
     LaunchedEffect(state.message) { state.message?.let { snackbar.showSnackbar(it); vm.dismissMessage() } }
     BackHandler(drawer.isOpen || selected != null || state.screen != "overview" || state.space != null) {
         when { drawer.isOpen -> scope.launch { drawer.close() }; selected != null -> vm.backToList(); else -> vm.showAll() }
@@ -188,15 +195,15 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
             Box(Modifier.fillMaxSize().padding(padding)) {
                 when {
                     selected != null -> TerminalScreen(vm, state, terminal, space) { scope.launch { drawer.open() } }
-                    state.screen == "machines" -> MachinesScreen(state, onAdd = { addHost = true }, onConnect = { vm.connect(it) }, onEdit = { editHost = it }, onDisconnect = vm::disconnect, onRemove = vm::removeHost)
+                    state.screen == "machines" -> MachinesScreen(state, nearby, onAdd = { addHost = true }, onAddNearby = ::addNearby, onConnect = { vm.connect(it) }, onEdit = { editHost = it }, onDisconnect = vm::disconnect, onRemove = vm::removeHost)
                     state.screen == "settings" -> SettingsScreen(state, vm)
-                    state.machines.values.none { it.connected || it.terminals.isNotEmpty() } -> WelcomeScreen(state, onAdd = { addHost = true }, onConnect = { vm.connect(it) }, onPreview = vm::enterDemo)
+                    state.machines.values.none { it.connected || it.terminals.isNotEmpty() } -> WelcomeScreen(state, nearby, onAdd = { addHost = true }, onAddNearby = ::addNearby, onConnect = { vm.connect(it) }, onPreview = vm::enterDemo)
                     else -> OverviewScreen(state, space, vm, onAll = vm::showAll)
                 }
             }
         }
     }
-    if (addHost) HostDialog(null, onDismiss = { addHost = false }, onSave = { vm.saveHost(it); addHost = false; vm.connect(it) })
+    if (addHost) HostDialog(null, onDismiss = { addHost = false; addPrefill = null }, onSave = { vm.saveHost(it); addHost = false; addPrefill = null; vm.connect(it) }, prefill = addPrefill)
     editHost?.let { host -> HostDialog(host, onDismiss = { editHost = null }, onSave = { vm.saveHost(it); editHost = null }) }
     state.passwordPrompt?.let { prompt -> state.hosts.find { it.id == prompt.hostId }?.let { host ->
         ConnectDialog(host, prompt.rejected, onDismiss = vm::dismissPasswordPrompt, onConnect = { password -> vm.connect(host, password) })
@@ -224,7 +231,7 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
     }
 }
 
-@Composable fun WelcomeScreen(state: PocketState, onAdd: () -> Unit, onConnect: (HostProfile) -> Unit, onPreview: () -> Unit) {
+@Composable fun WelcomeScreen(state: PocketState, nearby: List<NearbyHost>, onAdd: () -> Unit, onAddNearby: (NearbyHost) -> Unit, onConnect: (HostProfile) -> Unit, onPreview: () -> Unit) {
     val returning = state.hosts.isNotEmpty()
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 28.dp, vertical = 32.dp), verticalArrangement = Arrangement.Center) {
         Surface(color = Raised, shape = RoundedCornerShape(22.dp), modifier = Modifier.size(if (returning) 64.dp else 80.dp)) {
@@ -236,7 +243,7 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
             // Returning users get one-tap connect instead of a detour through Machines.
             Spacer(Modifier.height(28.dp))
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                state.hosts.forEach { host -> QuickConnectRow(host, state.machines[host.id] ?: MachineState()) { onConnect(host) } }
+                state.hosts.forEach { host -> QuickConnectRow(host, state.machines[host.id] ?: MachineState(), state.linkedFor(host)) { onConnect(host) } }
             }
             TextButton(onClick = onAdd, modifier = Modifier.padding(top = 6.dp)) {
                 Icon(Icons.Outlined.Add, null, Modifier.size(17.dp)); Spacer(Modifier.width(6.dp)); Text("Add another machine")
@@ -248,13 +255,14 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
                 Icon(Icons.Outlined.Add, null, Modifier.size(19.dp)); Spacer(Modifier.width(8.dp)); Text("Connect a machine", fontWeight = FontWeight.SemiBold)
             }
         }
+        if (nearby.isNotEmpty()) { Spacer(Modifier.height(24.dp)); NearbySection(nearby, onAddNearby) }
         TextButton(onClick = onPreview, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Explore the interface", color = Muted, fontSize = 13.sp) }
         Spacer(Modifier.height(36.dp)); HorizontalDivider(color = Border); Spacer(Modifier.height(20.dp))
         Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Terminal, null, Modifier.size(16.dp), tint = Muted); Spacer(Modifier.width(10.dp)); Text("Connects to your existing herdr-core over SSH", color = Muted, fontSize = 12.sp) }
     }
 }
 
-@Composable fun QuickConnectRow(host: HostProfile, machine: MachineState, onConnect: () -> Unit) {
+@Composable fun QuickConnectRow(host: HostProfile, machine: MachineState, linked: List<LinkedMachine>, onConnect: () -> Unit) {
     Surface(shape = RoundedCornerShape(14.dp), color = Surface, border = BorderStroke(1.dp, Border),
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(enabled = !machine.connecting, onClick = onConnect)) {
         Column(Modifier.padding(16.dp, 14.dp)) {
@@ -267,6 +275,10 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
                 Spacer(Modifier.width(8.dp))
                 if (machine.connecting) CircularProgressIndicator(Modifier.padding(horizontal = 18.dp).size(20.dp), strokeWidth = 2.dp)
                 else FilledTonalButton(onClick = onConnect) { Text("Connect") }
+            }
+            if (linked.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                Text("Also reaches " + linked.joinToString(", ") { it.name }, fontSize = 12.sp, color = Muted, lineHeight = 17.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             machine.error?.let { Spacer(Modifier.height(10.dp)); Text(it, color = Blocked, fontSize = 12.sp, lineHeight = 17.sp, maxLines = 3, overflow = TextOverflow.Ellipsis) }
         }
