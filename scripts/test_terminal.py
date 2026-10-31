@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """Browser regression checks for the bundled terminal (Python Playwright + Chromium)."""
-import base64, functools, http.server, json, pathlib, shutil, threading
+import base64, functools, http.server, json, pathlib, shutil, threading, time
 from playwright.sync_api import sync_playwright
 
 ASSETS = pathlib.Path(__file__).resolve().parents[1] / 'app/src/main/assets/terminal'
+def wait_for(page, expression, timeout=10):
+    """Poll with page.evaluate: wait_for_function evaluates through eval, which the page's CSP forbids."""
+    deadline = time.monotonic() + timeout
+    while not page.evaluate(expression):
+        if time.monotonic() > deadline: raise AssertionError(f'timed out waiting for {expression}')
+        page.wait_for_timeout(50)
 class Handler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *args): pass
 server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(Handler, directory=str(ASSETS)))
@@ -22,8 +28,8 @@ try:
           ready:()=>{window.__ready=true;window.resetTerminal(1);window.output(1,1,''' + json.dumps(paint) + ''')}
         };''')
         page.goto(f'http://127.0.0.1:{server.server_port}/index.html')
-        page.wait_for_function('window.__ready === true')
-        page.wait_for_function("document.querySelector('.xterm-rows').innerText.includes('Herdr fixture')")
+        wait_for(page, 'window.__ready === true')
+        wait_for(page, "document.querySelector('.xterm-rows').innerText.includes('Herdr fixture')")
         assert page.evaluate('terminal.rows') > 2
         # Android WebView can leave percentage-height parents at zero during startup.
         page.add_style_tag(content='html,body{height:0!important}')
@@ -115,9 +121,66 @@ try:
         sized = browser.new_page(viewport={'width': 420, 'height': 640})
         sized.add_init_script('window.Pocket={failed:()=>{},painted:()=>{},resized:()=>{},input:()=>{},fontSize:()=>{},ready:()=>{window.__ready=true}};')
         sized.goto(f'http://127.0.0.1:{server.server_port}/index.html?font=17')
-        sized.wait_for_function('window.__ready === true')
+        wait_for(sized, 'window.__ready === true')
         assert sized.evaluate('terminal.options.fontSize') == 17
+        # Links: a tap on a web link hands it to the app; OSC 8 links ask the app to confirm their target.
+        links = browser.new_page(viewport={'width': 420, 'height': 640})
+        links.add_init_script('''window.__links=[];window.__keys=[];window.Pocket={failed:m=>window.__error=m,painted:()=>{},resized:()=>{},
+          input:b=>window.__keys.push(b),fontSize:()=>{},openUrl:(u,c)=>window.__links.push([u,c]),ready:()=>{window.__ready=true;window.resetTerminal(1)}};''')
+        links.on('pageerror', lambda error: failures.append(str(error)))
+        links.goto(f'http://127.0.0.1:{server.server_port}/index.html')
+        wait_for(links, 'window.__ready === true')
+        links.evaluate("""() => {
+          const target=()=>document.querySelector('.xterm-screen');
+          const point=(row,col)=>{const s=target().getBoundingClientRect();return [s.left+(col+.5)*s.width/terminal.cols,s.top+(row+.5)*s.height/terminal.rows]};
+          const touch=(x,y)=>new Touch({identifier:1,target:target(),clientX:x,clientY:y,pageX:x,pageY:y});
+          window.tapCell=(row,col)=>{window.__links=[];const [x,y]=point(row,col);
+            target().dispatchEvent(new TouchEvent('touchstart',{bubbles:true,cancelable:true,touches:[touch(x,y)]}));
+            return target().dispatchEvent(new TouchEvent('touchend',{bubbles:true,cancelable:true,touches:[],changedTouches:[touch(x,y)]}))};
+          window.dragCell=(row,col)=>{window.__links=[];const [x,y]=point(row,col);
+            target().dispatchEvent(new TouchEvent('touchstart',{bubbles:true,cancelable:true,touches:[touch(x,y)]}));
+            target().dispatchEvent(new TouchEvent('touchmove',{bubbles:true,cancelable:true,touches:[touch(x,y+120)]}));
+            target().dispatchEvent(new TouchEvent('touchend',{bubbles:true,cancelable:true,touches:[],changedTouches:[touch(x,y+120)]}))};
+          window.cellCenter=point;
+        }""")
+        cols = links.evaluate('terminal.cols')
+        long_url = 'https://example.com/' + 'a' * (cols + 20)
+        app_url = 'https://wrap.example/' + 'b' * (cols + 10)
+        links.evaluate('''text => new Promise(done => terminal.write(text, done))''',
+            '\x1b[2J\x1b[HOpen https://a.dev/pull/2. Done\r\n'
+            + long_url + '\r\n' + app_url[:cols] + '\r\n' + app_url[cols:] + '\r\n'
+            + 'see \x1b]8;;https://example.com/target\x1b\\the docs\x1b]8;;\x1b\\ now\r\n'
+            + 'and \x1b]8;;javascript:alert(1)\x1b\\this\x1b]8;;\x1b\\ too\r\n')
+        assert links.evaluate('tapCell(0, 10)') is False, 'a tap on a link must not reach the terminal'
+        assert links.evaluate('window.__links') == [['https://a.dev/pull/2', False]]
+        assert links.evaluate('tapCell(0, 2)') is True and links.evaluate('window.__links') == []
+        links.evaluate('tapCell(0, 25)')
+        assert links.evaluate('window.__links') == [], 'punctuation after the link is not part of it'
+        # A link the terminal wrapped, tapped on its second row.
+        links.evaluate('tapCell(2, 3)')
+        assert links.evaluate('window.__links') == [[long_url, False]]
+        # A link a program wrapped itself by filling the row, tapped on either row.
+        links.evaluate('tapCell(4, 3)')
+        assert links.evaluate('window.__links') == [[app_url, False]]
+        links.evaluate('tapCell(3, 3)')
+        assert links.evaluate('window.__links') == [[app_url, False]]
+        # Dragging over a link scrolls instead of opening it.
+        links.evaluate('dragCell(0, 10)')
+        assert links.evaluate('window.__links') == []
+        # OSC 8: the shown text differs from the target, so the app is asked to confirm it.
+        x, y = links.evaluate('cellCenter(5, 6)')
+        links.evaluate('window.__links=[]')
+        links.mouse.move(x, y); links.wait_for_timeout(100); links.mouse.click(x, y)
+        links.wait_for_timeout(100)
+        assert links.evaluate('window.__links') == [['https://example.com/target', True]], links.evaluate('window.__links')
+        x, y = links.evaluate('cellCenter(6, 5)')
+        links.evaluate('window.__links=[]')
+        links.mouse.move(x, y); links.wait_for_timeout(100); links.mouse.click(x, y)
+        links.wait_for_timeout(100)
+        assert links.evaluate('window.__links') == [], 'non-web OSC 8 links are never handed over'
+        assert links.evaluate('window.__keys.length') == 0
+        assert not failures, failures
         browser.close()
-        print('PASS: paint, keyboard resize/input, touch history, hold position on output, latest, app mouse/alternate scrolling, pinch text size')
+        print('PASS: paint, keyboard resize/input, touch history, hold position on output, latest, app mouse/alternate scrolling, pinch text size, links')
 finally:
     server.shutdown()
