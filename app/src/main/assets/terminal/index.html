@@ -1,0 +1,64 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'none'; connect-src 'none'">
+<link rel="stylesheet" href="xterm.css">
+<style>html,body{width:100%;height:100vh;margin:0;background:#17191d;overflow:hidden}#terminal{position:fixed;top:0;right:0;bottom:0;left:0;padding:6px;box-sizing:border-box}#latest{position:fixed;right:12px;bottom:12px;border:1px solid #394454;border-radius:16px;background:#23252a;color:#96b2d7;padding:10px 14px;font:12px sans-serif;z-index:5}#latest[hidden]{display:none}.xterm-viewport::-webkit-scrollbar{width:3px}.xterm-viewport::-webkit-scrollbar-thumb{background:#394454}</style>
+</head><body><div id="terminal"></div><button id="latest" hidden aria-label="Latest output">↓ Latest</button><script>
+if(!window.globalThis)window.globalThis=window;
+if(!window.queueMicrotask)window.queueMicrotask=fn=>Promise.resolve().then(fn);
+for(const type of [Element,Document,DocumentFragment])if(!type.prototype.replaceChildren)type.prototype.replaceChildren=function(){while(this.firstChild)this.removeChild(this.firstChild);for(const child of arguments)this.appendChild(typeof child==='string'?document.createTextNode(child):child)};
+window.addEventListener('error',e=>Pocket.failed((e.error&&e.error.stack)||e.message||'Terminal renderer error'));
+</script><script src="xterm.js"></script><script src="addon-fit.js"></script>
+<script>
+const terminal=new Terminal({fontFamily:'monospace',fontSize:13,lineHeight:1.2,scrollback:5000,cursorBlink:true,convertEol:false,allowProposedApi:false,
+theme:{background:'#17191d',foreground:'#d2d4d9',cursor:'#d2d4d9',selectionBackground:'#394454',black:'#45484f',red:'#dc8c95',green:'#a6bd91',yellow:'#d8be87',blue:'#96b2d7',magenta:'#b5a2ce',cyan:'#8cbdc3',white:'#d2d4d9',brightBlack:'#818793',brightRed:'#f0a5ad',brightGreen:'#bad5a2',brightYellow:'#ead2a1',brightBlue:'#b0cbef',brightMagenta:'#cbb7e6',brightCyan:'#a4d5db',brightWhite:'#f0f0f2'}});
+const fit=new FitAddon.FitAddon();terminal.loadAddon(fit);terminal.open(document.getElementById('terminal'));
+// hc answers terminal queries. Forward human input only, never emulator query replies.
+terminal.onData((data)=>Pocket.input(btoa(unescape(encodeURIComponent(data)))));
+terminal.onBinary((data)=>Pocket.input(btoa(data)));
+let revision=0,ready=false,resizeTimer;
+// Each selected terminal owns a fresh WebView. Only change the stream token here;
+// resetting xterm during its first layout races its renderer on older WebViews.
+window.resetTerminal=(next)=>{revision=next};
+window.output=(expected,channel,base64)=>{if(expected!==revision)return;const data=Uint8Array.from(atob(base64),c=>c.charCodeAt(0));terminal.write(data,()=>Pocket.painted(expected,channel,data.length))};
+window.focusTerminal=()=>terminal.focus();
+const latest=document.getElementById('latest');
+const updateLatest=()=>{latest.hidden=terminal.buffer.active.type==='alternate'||terminal.buffer.active.viewportY>=terminal.buffer.active.baseY};
+latest.addEventListener('click',()=>{terminal.scrollToBottom();updateLatest()});
+terminal.onScroll(updateLatest);terminal.onWriteParsed(updateLatest);
+// xterm's built-in touch scrolling only moves its local viewport. Full-screen
+// programs (Claude, tmux, etc.) own their history and must receive wheel events.
+const surface=document.getElementById('terminal');
+let touch=null,suppressClickUntil=0;
+surface.addEventListener('touchstart',e=>{
+  if(e.touches.length!==1){touch=null;return}
+  const p=e.touches[0];touch={x:p.clientX,y:p.clientY,last:p.clientY,pending:0,dragged:false};
+},{capture:true,passive:true});
+surface.addEventListener('touchmove',e=>{
+  if(!touch||e.touches.length!==1)return;
+  const p=e.touches[0],dy=p.clientY-touch.y,dx=p.clientX-touch.x;
+  if(!touch.dragged){
+    if(Math.abs(dy)<8||Math.abs(dy)<Math.abs(dx))return;
+    touch.dragged=true;
+  }
+  e.preventDefault();e.stopImmediatePropagation();
+  touch.pending+=touch.last-p.clientY;touch.last=p.clientY;
+  const cell=terminal.element.querySelector('.xterm-rows').getBoundingClientRect().height/terminal.rows||16;
+  const lines=Math.trunc(touch.pending/cell);
+  if(!lines)return;
+  touch.pending-=lines*cell;
+  if(terminal.buffer.active.type==='normal'&&terminal.modes.mouseTrackingMode==='none')terminal.scrollLines(lines);
+  else terminal.element.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:lines,deltaMode:1,clientX:p.clientX,clientY:p.clientY}));
+  updateLatest();
+},{capture:true,passive:false});
+surface.addEventListener('touchend',e=>{
+  if(touch&&touch.dragged){e.preventDefault();e.stopImmediatePropagation();suppressClickUntil=Date.now()+400}
+  touch=null;
+},{capture:true,passive:false});
+surface.addEventListener('touchcancel',()=>{touch=null},{capture:true,passive:true});
+surface.addEventListener('click',e=>{if(Date.now()<suppressClickUntil){e.preventDefault();e.stopImmediatePropagation()}},{capture:true});
+function measure(){if(!document.documentElement.clientHeight)return;const dimensions=fit.proposeDimensions();if(!dimensions||dimensions.cols<2||dimensions.rows<2)return;fit.fit();if(!ready){ready=true;Pocket.ready(terminal.cols,terminal.rows)}else Pocket.resized(terminal.cols,terminal.rows)}
+const resized=()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(measure,120)};
+if(window.ResizeObserver)new ResizeObserver(resized).observe(document.getElementById('terminal'));else window.addEventListener('resize',resized);
+document.fonts.ready.then(()=>requestAnimationFrame(measure));
+</script></body></html>
