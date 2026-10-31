@@ -6,7 +6,16 @@ import android.os.Looper
 import android.util.Base64
 import android.webkit.*
 import android.view.inputmethod.InputMethodManager
+import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.Intent
+import androidx.core.net.toUri
+import android.widget.Toast
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -195,6 +204,24 @@ private val barKeys = listOf(
     }
 }
 
+/** Opens a terminal's web link in the browser. A link whose text may differ from its target is confirmed first. */
+@Composable fun rememberLinkOpener(): (String, Boolean) -> Unit {
+    val context = LocalContext.current
+    var asking by remember { mutableStateOf<String?>(null) }
+    asking?.let { url ->
+        AlertDialog(onDismissRequest = { asking = null }, title = { Text("Open this link?") },
+            text = { SelectionContainer { Text(url, fontSize = 13.sp, lineHeight = 19.sp, color = Muted) } },
+            confirmButton = { TextButton(onClick = { asking = null; openInBrowser(context, url) }) { Text("Open") } },
+            dismissButton = { TextButton(onClick = { asking = null }) { Text("Cancel") } })
+    }
+    return remember(context) { { url, confirm -> Links.browsable(url)?.let { if (confirm) asking = it else openInBrowser(context, it) } } }
+}
+
+private fun openInBrowser(context: Context, url: String) {
+    val intent = Intent(Intent.ACTION_VIEW, url.toUri()).addCategory(Intent.CATEGORY_BROWSABLE).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    try { context.startActivity(intent) } catch (_: ActivityNotFoundException) { Toast.makeText(context, "No app can open this link", Toast.LENGTH_SHORT).show() }
+}
+
 @Composable fun NativeTerminal(vm: PocketViewModel, text: String, alternate: Boolean, fontSize: Int, modifier: Modifier) {
     // While pinching, the size previews locally and is saved when the fingers lift.
     var pinchSize by remember { mutableStateOf<Int?>(null) }
@@ -251,9 +278,21 @@ private val barKeys = listOf(
         }
     }
     LaunchedEffect(fontSize) { pinchSize = null }
+    val openLink = rememberLinkOpener()
+    val shown = text.ifBlank { "Connecting…" }
+    val linked = remember(shown) {
+        buildAnnotatedString {
+            append(shown)
+            val style = TextLinkStyles(SpanStyle(textDecoration = TextDecoration.Underline))
+            for (range in Links.find(shown)) {
+                val url = shown.substring(range)
+                addLink(LinkAnnotation.Url(url, style) { openLink(url, false) }, range.first, range.last + 1)
+            }
+        }
+    }
     Box(modifier.background(Surface).onSizeChanged { viewport = it }.then(pinch).padding(8.dp)) {
         SelectionContainer {
-            Text(text.ifBlank { "Connecting…" }, style = style, softWrap = false,
+            Text(linked, style = style, softWrap = false,
                 modifier = Modifier.fillMaxSize().then(gestures).horizontalScroll(horizontal))
         }
         if (!alternate && vertical.value < vertical.maxValue - lineHeight * 2) {
@@ -269,6 +308,7 @@ private val barKeys = listOf(
     val context = LocalContext.current
     val handler = remember { Handler(Looper.getMainLooper()) }
     val webView = remember { WebView(context) }
+    val openLink by rememberUpdatedState(rememberLinkOpener())
     DisposableEffect(webView) {
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         var disposed = false
@@ -303,6 +343,8 @@ private val barKeys = listOf(
             }
             @JavascriptInterface fun painted(revision: Long, channel: Int, count: Int) { if (!disposed) vm.acknowledge(revision, channel, count) }
             @JavascriptInterface fun fontSize(size: Int) { handler.post { if (!disposed) vm.setFontSize(size) } }
+            // The page never navigates; links it reports are checked and handed to the browser.
+            @JavascriptInterface fun openUrl(url: String, confirm: Boolean) { handler.post { if (!disposed) openLink(url, confirm) } }
         }, "Pocket")
         vm.resetTerminal = { revision -> handler.post { if (!disposed) webView.evaluateJavascript("window.resetTerminal($revision)", null) } }
         vm.terminalBytes = { revision, channel, bytes ->

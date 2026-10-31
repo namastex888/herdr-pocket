@@ -13,6 +13,7 @@ window.addEventListener('error',e=>Pocket.failed((e.error&&e.error.stack)||e.mes
 const fontRange=[8,24],clampFont=n=>Math.max(fontRange[0],Math.min(fontRange[1],Math.round(n)||13));
 const initialFont=clampFont(Number(new URLSearchParams(location.search).get('font'))||13);
 const terminal=new Terminal({fontFamily:'monospace',fontSize:initialFont,lineHeight:1.2,scrollback:5000,cursorBlink:true,convertEol:false,allowProposedApi:false,
+linkHandler:{allowNonHttpProtocols:false,activate:(e,uri)=>Pocket.openUrl(uri,true)},
 theme:{background:'#17191d',foreground:'#d2d4d9',cursor:'#d2d4d9',selectionBackground:'#394454',black:'#45484f',red:'#dc8c95',green:'#a6bd91',yellow:'#d8be87',blue:'#96b2d7',magenta:'#b5a2ce',cyan:'#8cbdc3',white:'#d2d4d9',brightBlack:'#818793',brightRed:'#f0a5ad',brightGreen:'#bad5a2',brightYellow:'#ead2a1',brightBlue:'#b0cbef',brightMagenta:'#cbb7e6',brightCyan:'#a4d5db',brightWhite:'#f0f0f2'}});
 const fit=new FitAddon.FitAddon();terminal.loadAddon(fit);terminal.open(document.getElementById('terminal'));
 // hc answers terminal queries. Forward human input only, never emulator query replies.
@@ -30,6 +31,28 @@ latest.addEventListener('click',()=>{terminal.scrollToBottom();updateLatest()});
 terminal.onScroll(updateLatest);terminal.onWriteParsed(updateLatest);
 // xterm's built-in touch scrolling only moves its local viewport. Full-screen
 // programs (Claude, tmux, etc.) own their history and must receive wheel events.
+// Web links: the same rules as Links.kt. A tap on one opens it; nothing else navigates.
+const urlPattern=/https?:\/\/[^\s"'<>`\u0000-\u001f]+/g;
+const trimUrl=u=>{let before;do{before=u;u=u.replace(/[.,;:!?'"*]+$/,'');for(const[o,c]of['()','[]','{}'])if(u.endsWith(c)&&u.split(o).length<u.split(c).length)u=u.slice(0,-1)}while(u!==before);return u};
+// A row's text, and where each column starts in it (wide characters take two columns).
+const rowText=line=>{let text='';const at=[];for(let x=0;x<terminal.cols;x++){const cell=line.getCell(x);if(!cell)break;at.push(text.length);if(cell.getWidth()!==0)text+=cell.getChars()||' '}return{text,at}};
+// Row y continues on y+1: soft-wrapped, or a program filled the row with a link and went on.
+const continues=y=>{const b=terminal.buffer.active,line=b.getLine(y),next=b.getLine(y+1);if(!line||!next)return false;if(next.isWrapped)return true;
+  const text=line.translateToString(false);return text.length>=terminal.cols&&text[text.length-1]!==' '&&/https?:\/\/\S*$/.test(text)&&/^[^\s]/.test(next.translateToString(true))};
+window.linkAt=(y,x)=>{
+  const b=terminal.buffer.active;if(!b.getLine(y))return null;
+  let first=y;while(first>0&&continues(first-1)&&y-first<20)first--;
+  let text='',offset=-1;
+  for(let row=first;row<first+40;row++){const line=b.getLine(row);if(!line)break;const r=rowText(line);
+    if(row===y)offset=text.length+(r.at[Math.min(x,r.at.length-1)]||0);
+    text+=continues(row)?r.text:r.text.replace(/\s+$/,'');if(!continues(row))break}
+  if(offset<0)return null;
+  urlPattern.lastIndex=0;let m;
+  while((m=urlPattern.exec(text))){const url=trimUrl(m[0]);if(offset>=m.index&&offset<m.index+url.length&&url.split('://')[1])return url}
+  return null};
+const cellAt=(clientX,clientY)=>{const screen=terminal.element.querySelector('.xterm-screen').getBoundingClientRect();
+  const x=Math.floor((clientX-screen.left)/(screen.width/terminal.cols)),row=Math.floor((clientY-screen.top)/(screen.height/terminal.rows));
+  return x<0||row<0||x>=terminal.cols||row>=terminal.rows?null:{x,y:terminal.buffer.active.viewportY+row}};
 const surface=document.getElementById('terminal');
 let touch=null,pinch=null,suppressClickUntil=0;
 // Two fingers change the text size; the app stores it when the fingers lift.
@@ -39,7 +62,7 @@ window.setFontSize=n=>{const size=clampFont(n);if(size!==terminal.options.fontSi
 surface.addEventListener('touchstart',e=>{
   if(e.touches.length===2){touch=null;pinch={distance:spread(e.touches),size:terminal.options.fontSize};return}
   if(e.touches.length!==1){touch=null;endPinch();return}
-  const p=e.touches[0];touch={x:p.clientX,y:p.clientY,last:p.clientY,pending:0,dragged:false};
+  const p=e.touches[0];touch={x:p.clientX,y:p.clientY,last:p.clientY,pending:0,dragged:false,at:Date.now()};
 },{capture:true,passive:true});
 surface.addEventListener('touchmove',e=>{
   if(pinch&&e.touches.length===2){e.preventDefault();e.stopImmediatePropagation();window.setFontSize(pinch.size*spread(e.touches)/pinch.distance);return}
@@ -66,6 +89,11 @@ surface.addEventListener('touchend',e=>{
     touch=null;return;
   }
   if(touch&&touch.dragged){e.preventDefault();e.stopImmediatePropagation();suppressClickUntil=Date.now()+400}
+  else if(touch&&e.touches.length===0&&Date.now()-touch.at<500){
+    // A quick tap on a link opens it instead of focusing the terminal.
+    const cell=cellAt(touch.x,touch.y),url=cell&&window.linkAt(cell.y,cell.x);
+    if(url){e.preventDefault();e.stopImmediatePropagation();suppressClickUntil=Date.now()+400;Pocket.openUrl(url,false)}
+  }
   touch=null;
 },{capture:true,passive:false});
 surface.addEventListener('touchcancel',()=>{touch=null;endPinch()},{capture:true,passive:true});
