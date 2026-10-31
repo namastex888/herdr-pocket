@@ -1,6 +1,7 @@
 package dev.herdr.pocket
 
 import android.app.Application
+import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.*
@@ -16,7 +17,9 @@ import java.util.concurrent.ConcurrentHashMap
 // session increases with each successful connection, so open terminal views know to attach again.
 data class MachineState(val connecting: Boolean = false, val connected: Boolean = false, val version: String = "",
     val terminals: List<CoreTerminal> = emptyList(), val spaces: List<PocketSpace> = emptyList(), val error: String? = null,
-    val session: Int = 0, val needsPassword: Boolean = false, val linked: List<LinkedMachine> = emptyList()) {
+    val session: Int = 0, val needsPassword: Boolean = false, val linked: List<LinkedMachine> = emptyList(),
+    /** Desktop avatar colours (shared.json space.colors), by space id. */
+    val colors: Map<String, String> = emptyMap()) {
     /** Dropped or failed, as opposed to never connected or disconnected on purpose. */
     val offline get() = !connected && (connecting || error != null)
     /** Worth retrying without asking: a dropped or failed connection that isn't waiting on a password. */
@@ -37,7 +40,9 @@ data class PocketState(
     /** A Pocket Link pairing is in progress. */
     val pairing: Boolean = false,
     /** A pairing link that arrived from outside the app, waiting for the person to confirm it. */
-    val offeredPairing: PairingLink? = null
+    val offeredPairing: PairingLink? = null,
+    /** Folded drawer machine groups, as "hostId|machine". */
+    val folded: Set<String> = emptySet()
 )
 const val DEFAULT_FONT_SIZE = 13
 val FONT_SIZES = 8..24
@@ -47,10 +52,19 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     val discovery = Discovery(application)
     private val keys = SshKeys(application.noBackupFilesDir)
     private val _state = MutableStateFlow(PocketState(nativeDisplay = prefs.getBoolean("native_display", false),
-        fontSize = prefs.getInt("font_size", DEFAULT_FONT_SIZE).coerceIn(FONT_SIZES), hosts = runCatching {
+        fontSize = prefs.getInt("font_size", DEFAULT_FONT_SIZE).coerceIn(FONT_SIZES), folded = prefs.getStringSet("folded_machines", null).orEmpty().toSet(), hosts = runCatching {
         JSONArray(prefs.getString("hosts", "[]")).objects().map(HostProfile::parse)
     }.getOrDefault(emptyList())))
     val state = _state.asStateFlow()
+    /** Herdr desktop's program table, for the drawer's names and icons. */
+    val programs: Programs by lazy { Programs(JSONObject(application.assets.open("programs.json").bufferedReader().use { it.readText() })) }
+    private val colorsRead = ConcurrentHashMap<String, Long>()
+    private val homes = ConcurrentHashMap<String, String>()
+    fun toggleFold(key: String) {
+        val folded = state.value.folded.let { if (key in it) it - key else it + key }
+        prefs.edit { putStringSet("folded_machines", folded) }
+        _state.update { it.copy(folded = folded) }
+    }
     private val clients = ConcurrentHashMap<String, CoreClient>()
     private val jobs = ConcurrentHashMap<String, Job>()
     private val temporaryPasswords = ConcurrentHashMap<String, String>()
@@ -250,7 +264,8 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         val list = client.call("terminal.list")
         val terminals = list.optJSONArray("terminals")?.objects()?.map(CoreTerminal::parse).orEmpty()
         val local = client.call("doc.get", JSONObject().put("name", "herdr-app"))
-        val spaces = LayoutReader.spaces(local.optJSONObject("value"), terminals = terminals).toMutableList()
+        val home = homes.getOrPut(id) { exec(client, "printenv", "HOME") }
+        val spaces = LayoutReader.spaces(local.optJSONObject("value"), terminals = terminals, home = home).toMutableList()
         for (machine in list.optJSONArray("machines")?.objects().orEmpty()) {
             if (machine.clean("state") != "connected") continue
             val name = machine.getString("name")
@@ -260,7 +275,21 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         val linked = LinkedMachine.list(list, terminals)
         updateMachine(id) { it.copy(terminals = terminals, spaces = spaces, linked = linked, error = null) }
         rememberLinked(id, linked.map { it.name })
+        // The desktop assigns colours as spaces appear; read them again now and then, never write them.
+        val now = System.currentTimeMillis()
+        if (now - (colorsRead[id] ?: 0L) > 30_000) { colorsRead[id] = now; runCatching { readColors(id, client) } }
     }
+    private suspend fun readColors(id: String, client: CoreClient) {
+        val home = exec(client, "printenv", "HERDR_APP_HOME").ifBlank { (homes[id] ?: exec(client, "printenv", "HOME")).ifBlank { return } + "/.config/herdr-app" }
+        val shared = JSONObject(client.call("file.read", JSONObject().put("path", "$home/shared.json")).optString("text", "{}"))
+        val colors = shared.optJSONObject("space.colors") ?: return
+        updateMachine(id) { it.copy(colors = colors.keys().asSequence().associateWith { k -> colors.optString(k) }) }
+    }
+    /** A program's trimmed output on the core's machine, or "" if it failed. */
+    private suspend fun exec(client: CoreClient, vararg argv: String): String = runCatching {
+        val r = client.call("machine.exec", JSONObject().put("argv", JSONArray(argv.toList())))
+        if (r.optInt("code", 1) != 0) "" else String(java.util.Base64.getDecoder().decode(r.optString("stdout")), Charsets.UTF_8).trim()
+    }.getOrDefault("")
     /** Saves which machines a core reaches, so the start screen lists them before the next connection. */
     private fun rememberLinked(id: String, names: List<String>) {
         val hosts = state.value.hosts

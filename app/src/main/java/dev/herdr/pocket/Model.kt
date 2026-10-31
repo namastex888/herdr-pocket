@@ -42,7 +42,10 @@ data class LinkedMachine(val name: String, val state: String, val terminals: Int
 data class CoreTerminal(
     val address: String, val title: String, val cwd: String, val state: String,
     val status: String, val agent: String, val message: String, val cols: Int, val rows: Int,
-    val labels: Map<String, String> = emptyMap()
+    val labels: Map<String, String> = emptyMap(),
+    /** As the core reports them, for the sidebar's own naming and icon rules. */
+    val hcName: String = "", val rawTitle: String = "", val app: String = "", val parent: String = "",
+    val template: String = "", val argv: List<String> = emptyList()
 ) {
     val live get() = state == "live"
     val attention get() = status == "blocked" || status == "error"
@@ -56,7 +59,9 @@ data class CoreTerminal(
             return CoreTerminal(j.getString("address"), j.clean("name").ifBlank { j.clean("title") }.ifBlank { agent },
                 foreground?.clean("cwd").orEmpty().ifBlank { j.clean("cwd") }, j.clean("state"),
                 status?.clean("state").orEmpty(), agent, status?.clean("msg").orEmpty(),
-                j.optInt("cols", 80), j.optInt("rows", 24), j.optJSONObject("labels")?.let { o -> o.keys().asSequence().associateWith { o.getString(it) } } ?: emptyMap())
+                j.optInt("cols", 80), j.optInt("rows", 24), j.optJSONObject("labels")?.let { o -> o.keys().asSequence().associateWith { o.getString(it) } } ?: emptyMap(),
+                j.clean("name"), j.clean("title"), status?.clean("app").orEmpty(), j.clean("parent"), j.clean("template"),
+                argv?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty())
         }
     }
 }
@@ -70,15 +75,19 @@ data class PocketSpace(val id: String, val name: String, val folder: String, val
 }
 
 object LayoutReader {
-    /** A folder's display name as the desktop gives it: "~" at home, else its last segment. */
-    fun folderName(path: String): String {
+    /** A folder's display name as the desktop gives it: "~" for the desktop's own home, else its last segment. */
+    fun folderName(path: String, home: String = ""): String {
         val p = path.trimEnd('/')
-        return if (p.isEmpty() || HOME.matches(p)) "~" else p.substringAfterLast('/')
+        return if (p.isEmpty() || p == "~" || (home.isNotBlank() && p == home.trimEnd('/'))) "~" else p.substringAfterLast('/')
     }
-    private val HOME = Regex("/(Users|home)/[^/]+|/root|~")
 
-    /** [terminals] name a space nobody named after where its first terminal is now, like the desktop. */
-    fun spaces(document: JSONObject?, machine: String = "", terminals: List<CoreTerminal> = emptyList()): List<PocketSpace> {
+    /**
+     * [terminals] name a space nobody named after where its first terminal is now, like the desktop. [home] is the
+     * core machine's home: only there is a folder called "~"; other machines' homes keep their names, as on the desktop.
+     */
+    fun spaces(document: JSONObject?, machine: String = "", terminals: List<CoreTerminal> = emptyList(), home: String = ""): List<PocketSpace> {
+        val own = if (machine.isBlank()) home else ""
+        fun named(path: String) = folderName(path, own)
         fun qualify(s: String) = if (machine.isBlank()) s else "$machine/$s"
         return document?.optJSONArray("spaces")?.objects()?.map { s ->
             val tabs = s.optJSONArray("tabs")?.objects()?.map { t ->
@@ -94,8 +103,8 @@ object LayoutReader {
                 PocketTab(qualify(t.getString("id")), t.clean("name"), addresses.distinct())
             }.orEmpty()
             val first = tabs.firstNotNullOfOrNull { t -> t.terminals.firstOrNull() }?.let { a -> terminals.find { it.address == a } }
-            val name = s.clean("name").ifBlank { first?.cwd?.takeIf { it.isNotBlank() }?.let(::folderName).orEmpty() }
-                .ifBlank { s.clean("folder").takeIf { it.isNotBlank() }?.let(::folderName).orEmpty() }.ifBlank { "Untitled space" }
+            val name = s.clean("name").ifBlank { first?.cwd?.takeIf { it.isNotBlank() }?.let(::named).orEmpty() }
+                .ifBlank { s.clean("folder").takeIf { it.isNotBlank() }?.let(::named).orEmpty() }.ifBlank { "Untitled space" }
             PocketSpace(qualify(s.getString("id")), name, s.clean("folder"), machine, tabs)
         }.orEmpty()
     }

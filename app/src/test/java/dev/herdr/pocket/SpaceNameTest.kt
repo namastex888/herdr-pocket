@@ -16,10 +16,12 @@ class SpaceNameTest {
         val terminals = listOf(terminal("t1m", "/Users/me/workspace", "/Users/me/workspace/repos/brain-v3"),
             terminal("t16r", "/Users/me/workspace/repos/brain-v3", "/Users/me/workspace/repos/herdr-pocket"),
             terminal("t20", "/Users/me/y", "/Users/me/y"), terminal("t9", "/home/me", "/home/me/"))
-        assertEquals(listOf("brain-v3", "herdr-pocket", "T1 · components", "~", "~"), LayoutReader.spaces(doc, terminals = terminals).map { it.name })
+        assertEquals(listOf("brain-v3", "herdr-pocket", "T1 · components", "~", "me"), LayoutReader.spaces(doc, terminals = terminals, home = "/Users/me").map { it.name })
     }
     @Test fun forwardedSpacesMatchTheirQualifiedTerminals() {
         val doc = JSONObject("""{"spaces":[${space("a", "", "/home/me", "t1")}]}""")
         assertEquals("droid", LayoutReader.spaces(doc, "hx470", listOf(terminal("hx470/t1", "/home/me", "/home/me/repos/droid"))).single().name)
+        // Only the core's own home is "~": the desktop names another machine's home after its folder.
+        assertEquals("me", LayoutReader.spaces(doc, "hx470", listOf(terminal("hx470/t1", "/home/me", "/home/me")), home = "/home/me").single().name)
     }
 }
