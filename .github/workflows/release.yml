@@ -1,0 +1,149 @@
+name: Release
+
+# Automagik's release model: every merge to dev that brings a feat, fix or other shipping commit cuts the next
+# 0.N.0. The run gates it, commits "chore(release): v0.N.0" with version.properties, tags it, builds the
+# release-signed APK and publishes it as the Latest GitHub release with latest.json, which installed copies
+# read to update. Merges with only chore(release), ci, docs or test commits release nothing.
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  cut:
+    name: Cut v<version> on dev
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: release-cut
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.cut.outputs.version }}
+      previous: ${{ steps.new.outputs.previous }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Anything new since the last release
+        id: new
+        run: |
+          set -euo pipefail
+          last=$(git tag --list 'v0.*.0' --sort=-v:refname | grep -E '^v0\.(0|[1-9][0-9]{0,3})\.0$' | head -1 || true)
+          echo "previous=${last}" >> "$GITHUB_OUTPUT"
+          range="${last:+${last}..}HEAD"
+          if [[ -n "$(git log --no-merges --format=%s "${range}" | grep -vE '^(chore\(release\)|ci|docs|test)(\([^)]*\))?!?: ' || true)" ]]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "dev has nothing that ships since ${last:-the start}: no release"
+          fi
+
+      - uses: actions/setup-java@v4
+        if: steps.new.outputs.release == 'true'
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+        if: steps.new.outputs.release == 'true'
+        with:
+          packages: 'platforms;android-35 build-tools;35.0.0'
+
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.new.outputs.release == 'true'
+
+      - name: The gates the release stands on
+        if: steps.new.outputs.release == 'true'
+        run: ./gradlew --stacktrace :app:testDebugUnitTest :app:lintDebug
+
+      - name: Version, commit and tag
+        id: cut
+        if: steps.new.outputs.release == 'true'
+        run: |
+          set -euo pipefail
+          version=$(scripts/version.sh next)
+          scripts/version.sh set "${version}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -qam "chore(release): v${version}"
+          git tag -a "v${version}" -m "Automagik Pocket ${version}"
+          if ! git push -q --atomic origin HEAD:refs/heads/dev "refs/tags/v${version}"; then
+            git fetch -q origin dev
+            if [[ "$(git rev-parse origin/dev)" != "$(git rev-parse HEAD~1)" ]]; then
+              echo "::notice::dev moved on while this run cut v${version}; the run for the newer merge releases these changes too"
+              exit 0
+            fi
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: Publish v${{ needs.cut.outputs.version }}
+    needs: cut
+    if: needs.cut.outputs.version != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.cut.outputs.version }}
+      PREVIOUS: ${{ needs.cut.outputs.previous }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.cut.outputs.version }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-35 build-tools;35.0.0'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build the release APK
+        env:
+          KEYSTORE: ${{ secrets.POCKET_SIGNING_KEYSTORE }}
+          POCKET_SIGNING_PASSWORD: ${{ secrets.POCKET_SIGNING_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEYSTORE" ] || [ -z "$POCKET_SIGNING_PASSWORD" ]; then
+            echo "::error::No release key in this repository's secrets: a release must be signed with it."; exit 1
+          fi
+          export POCKET_SIGNING_STORE="$RUNNER_TEMP/pocket.jks"
+          echo "$KEYSTORE" | base64 -d > "$POCKET_SIGNING_STORE"
+          ./gradlew --stacktrace :app:assembleRelease
+          rm -f "$POCKET_SIGNING_STORE"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="v${VERSION}"
+          meta=app/build/outputs/apk/release/output-metadata.json
+          code=$(jq -r '.elements[0].versionCode' "$meta")
+          name=$(jq -r '.elements[0].versionName' "$meta")
+          [ "$name" = "$VERSION" ] || { echo "::error::the APK says ${name}, the tag says ${VERSION}"; exit 1; }
+          cp app/build/outputs/apk/release/app-release.apk automagik.apk
+          sha=$(sha256sum automagik.apk | cut -d' ' -f1)
+          # What shipped: the conventional subjects since the previous release, without the release commits.
+          changes=$(git log --no-merges --format='- %s' "${PREVIOUS:+${PREVIOUS}..}${tag}" | grep -vE '^- chore\(release\)' | head -40 || true)
+          summary=$(printf '%s\n' "$changes" | head -5 | sed 's/^- //' | paste -sd ';' - | head -c 400)
+          jq -n --argjson code "$code" --arg name "$name" --arg sha "$sha" --arg notes "$summary" \
+            --arg url "https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/automagik.apk" \
+            '{versionCode: $code, versionName: $name, url: $url, sha256: $sha, notes: $notes}' > latest.json
+          printf '%s\n\nSHA-256 of `automagik.apk`: `%s`\n' "${changes:-- Maintenance.}" "$sha" > notes.md
+          gh release create "$tag" automagik.apk latest.json --verify-tag --latest \
+            --title "Automagik Pocket ${VERSION}" --notes-file notes.md
