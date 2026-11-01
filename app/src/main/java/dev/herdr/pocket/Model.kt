@@ -45,7 +45,9 @@ data class CoreTerminal(
     val labels: Map<String, String> = emptyMap(),
     /** As the core reports them, for the sidebar's own naming and icon rules. */
     val hcName: String = "", val rawTitle: String = "", val app: String = "", val parent: String = "",
-    val template: String = "", val argv: List<String> = emptyList()
+    val template: String = "", val argv: List<String> = emptyList(),
+    /** When the status word last changed (ms since the epoch, 0 if never), the core's turn count, and a blocked agent's kind (permission, question or auth). */
+    val statusMs: Long = 0, val turn: Long = 0, val kind: String = ""
 ) {
     val live get() = state == "live"
     val attention get() = status == "blocked" || status == "error"
@@ -61,7 +63,8 @@ data class CoreTerminal(
                 status?.clean("state").orEmpty(), agent, status?.clean("msg").orEmpty(),
                 j.optInt("cols", 80), j.optInt("rows", 24), j.optJSONObject("labels")?.let { o -> o.keys().asSequence().associateWith { o.getString(it) } } ?: emptyMap(),
                 j.clean("name"), j.clean("title"), status?.clean("app").orEmpty(), j.clean("parent"), j.clean("template"),
-                argv?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty())
+                argv?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty(),
+                j.optLong("status_ms", 0), j.optLong("turn", 0), status?.clean("kind").orEmpty())
         }
     }
 }

@@ -159,9 +159,33 @@ fun NearbyHost.prefill() = HostProfile("", name, host, "", port)
         SmallLabel("About"); Spacer(Modifier.height(15.dp))
         Row(verticalAlignment = Alignment.CenterVertically) { Brand(36); Spacer(Modifier.width(12.dp)); Column { Text("Herdr Pocket", fontWeight = FontWeight.SemiBold); Text("${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · Android companion", color = Muted, fontSize = 12.sp) } }
         Spacer(Modifier.height(16.dp)); UpdateRow()
+        CrashRow()
         Spacer(Modifier.height(18.dp)); Text("A native companion for your existing herdr-core. Graphite colors, spaces and tabs follow the desktop’s design.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
         Spacer(Modifier.height(10.dp)); Text("Connections run while the app is open. Android may close them in the background; pull down on the agent list or tap Reconnect. Your remote programs keep running.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
         Spacer(Modifier.height(20.dp)); TextButton(onClick = vm::enterDemo, contentPadding = PaddingValues(0.dp)) { Text("Explore the interface with sample data", fontSize = 13.sp) }
+    }
+}
+
+/** Settings → About: the last crash's report, to copy or send to whoever builds the app. */
+@Composable fun CrashRow() {
+    var report by remember { mutableStateOf(CrashLog.read()) }
+    val crash = report ?: return
+    val clipboard = LocalClipboardManager.current
+    val activity = LocalActivity.current
+    Spacer(Modifier.height(18.dp))
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Blocked.copy(alpha = .08f)).border(1.dp, Blocked.copy(alpha = .25f), RoundedCornerShape(10.dp)).padding(14.dp, 12.dp, 6.dp, 4.dp)) {
+        Text("Herdr Pocket closed unexpectedly", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(4.dp))
+        Text(crash.lines().drop(4).firstOrNull { it.isNotBlank() }.orEmpty(), color = Muted, fontSize = 11.sp, fontFamily = FontFamily.Monospace, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Row {
+            TextButton(onClick = { clipboard.setText(AnnotatedString(crash)) }) { Text("Copy report", fontSize = 13.sp) }
+            TextButton(onClick = {
+                runCatching { activity?.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                    .putExtra(android.content.Intent.EXTRA_SUBJECT, "Herdr Pocket crash").putExtra(android.content.Intent.EXTRA_TEXT, crash), "Send crash report")) }
+            }) { Text("Share", fontSize = 13.sp) }
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = { CrashLog.clear(); report = null }) { Text("Clear", fontSize = 13.sp, color = Muted) }
+        }
     }
 }
 
