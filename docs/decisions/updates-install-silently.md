@@ -22,7 +22,7 @@ Android notifications replace the in-app "update available" bar.
 
 - Checks: on open (at most every 15 minutes) and every 6 hours while the process runs
   (`android/app/src/main/java/ai/namastex/automagik/Updater.kt:121-150`,
-  `PocketViewModel.kt:386`).
+  `PocketViewModel.kt:390`).
 - Silent or notify, and when installing would interrupt: `UpdatePolicy.kt` (unit tested in
   `UpdatePolicyTest.kt`). Silent needs Android 12+, the switch on, install-apps allowed and an
   unmetered network. It waits while a terminal is open on screen, and on other screens until the
