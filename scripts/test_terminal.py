@@ -23,7 +23,7 @@ try:
         page.on('pageerror', lambda error: failures.append(str(error)))
         paint = base64.b64encode(b'\x1b[2J\x1b[H\x1b[38;2;150;178;215mHerdr fixture\x1b[0m\r\nReady for input.').decode()
         page.add_init_script('''window.__keys=[];window.Pocket={
-          failed:m=>window.__error=m, painted:()=>{}, resized:()=>{}, fontSize:n=>window.__font=n,
+          failed:m=>window.__error=m, painted:()=>{}, resized:()=>{}, fontSize:n=>window.__font=n, scrolled:u=>(window.__scrolled=window.__scrolled||[]).push(u),
           input:b=>window.__keys.push(b),
           ready:()=>{window.__ready=true;window.resetTerminal(1);window.output(1,1,''' + json.dumps(paint) + ''')}
         };''')
@@ -66,6 +66,10 @@ try:
         assert page.evaluate('terminal.buffer.active.viewportY < terminal.buffer.active.baseY')
         assert page.evaluate('window.__keys.length') == 0
         assert page.locator('#latest').is_visible()
+        # Scrolling back reports up once per gesture; scrolling on reports down.
+        assert page.evaluate('window.__scrolled') == [True], page.evaluate('window.__scrolled')
+        page.evaluate('swipe(440,300)')
+        assert page.evaluate('window.__scrolled') == [True, False], page.evaluate('window.__scrolled')
         old_position = page.evaluate('terminal.buffer.active.viewportY')
         page.evaluate("terminal.write('\\r\\nnew-output')")
         page.wait_for_timeout(100)
