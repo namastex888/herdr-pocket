@@ -180,7 +180,7 @@ fun NearbyHost.prefill() = HostProfile("", name, host, "", port)
         Row(verticalAlignment = Alignment.CenterVertically) { Brand(36); Spacer(Modifier.width(12.dp)); Column { Text("Automagik", fontWeight = FontWeight.SemiBold); Text("${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · Android companion", color = Muted, fontSize = 12.sp) } }
         Spacer(Modifier.height(16.dp)); UpdateRow()
         CrashRow()
-        Spacer(Modifier.height(18.dp)); Text("A native companion for your existing herdr-core. Graphite colors, spaces and tabs follow the desktop’s design.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
+        Spacer(Modifier.height(18.dp)); Text("A native companion for your existing herdr-core, in Automagik’s colors, light or dark as your phone is set. Spaces and tabs follow the desktop’s design.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
         Spacer(Modifier.height(10.dp)); Text("With Watch in background on, connections stay open while you’re away and come back on their own after a drop. Otherwise Android may close them; pull down on the agent list or tap Reconnect. Your remote programs keep running.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
         Spacer(Modifier.height(20.dp)); TextButton(onClick = vm::enterDemo, contentPadding = PaddingValues(0.dp)) { Text("Explore the interface with sample data", fontSize = 13.sp) }
     }
@@ -208,7 +208,7 @@ fun NearbyHost.prefill() = HostProfile("", name, host, "", port)
             Text("Side button assistant", fontSize = 15.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(2.dp))
             Text(if (held) "Automagik is your assistant. Hold the side button to see what needs you and answer by typing or speaking, on the lock screen too."
-                else "Hold the side button to open Herdr over any screen, the lock screen too: see what needs you and answer by typing or speaking.",
+                else "Hold the side button to open Automagik over any screen, the lock screen too: see what needs you and answer by typing or speaking.",
                 color = Muted, fontSize = 12.sp, lineHeight = 17.sp)
         }
         Spacer(Modifier.width(8.dp))

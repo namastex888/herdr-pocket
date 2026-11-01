@@ -53,7 +53,7 @@ class SshKeys(private val identityRoot: File) {
             override fun add(hostkey: HostKey?, ui: UserInfo?) { }
             override fun remove(host: String?, type: String?) { }
             override fun remove(host: String?, type: String?, key: ByteArray?) { }
-            override fun getKnownHostsRepositoryID() = "Herdr Pocket verified hosts"
+            override fun getKnownHostsRepositoryID() = "Automagik verified hosts"
             override fun getHostKey(): Array<HostKey> = emptyArray()
             override fun getHostKey(host: String?, type: String?): Array<HostKey> = emptyArray()
         }
