@@ -1,5 +1,5 @@
 //! The Automagik usage meter: token usage of coding agents on this machine, kept as `ae/1`
-//! (agent event envelope, revision 2, owned by automagik-herdr) `agent.usage` rows in a local
+//! (agent event envelope, revision 3, owned by automagik-herdr) `agent.usage` rows in a local
 //! SQLite file, and published as a small summary doc in herdr-core.
 //!
 //! Nothing here opens a network connection; the only process it talks to is the local `hc`.

@@ -116,7 +116,7 @@ fn cmd_sync(args: Vec<String>) -> Result<ExitCode, String> {
             );
             if r.reimported {
                 println!(
-                    "meter: window widened; re-imported from {}",
+                    "meter: window widened or store rebuilt; re-imported from {}",
                     format_rfc3339(r.counted_from_ms)
                 );
             }
