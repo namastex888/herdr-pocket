@@ -37,7 +37,7 @@ The phone and the desktop dial each other by public key over [iroh](https://iroh
 3. Open **Herdr Pocket → Settings** and copy the public key. Add it as a line to the host user's `~/.ssh/authorized_keys`. Alternatively use SSH password authentication: the app asks for the password when the host rejects the key, and doesn't save it.
 4. Tap **Connect a machine** (or **Machines → Add machine**), enter the hostname, SSH user and port, and the core session name (`default` unless you chose another). Tap **Save and connect**.
 5. Compare the fingerprint shown with your host's SSH public-key fingerprint before trusting it. For an Ed25519 SSH server key, run `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the host.
-6. Open the hamburger drawer to choose a space, or choose an agent from All agents.
+6. Open the hamburger drawer to choose a space, or open an agent from the Cockpit: what needs you first, then what finished.
 
 The app executes `hc connect` through an SSH exec channel. It also finds `herdr-core` and `~/.local/bin/hc` if the login PATH does not contain `hc`. No relay, web server or plugin is installed on the host. It does not connect to the older `herdr` TUI runtime.
 

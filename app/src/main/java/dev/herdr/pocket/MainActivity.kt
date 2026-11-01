@@ -155,6 +155,10 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
         }
     }
     LifecycleResumeEffect(Unit) { activity?.let(Updater::resume); onPauseOrDispose { } }
+    LaunchedEffect(Unit) {
+        if (CrashLog.announce() && snackbar.showSnackbar("Herdr Pocket closed unexpectedly last time", "Report", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed)
+            vm.navigate("settings")
+    }
     BackHandler(drawer.isOpen || selected != null || state.screen != "overview" || state.space != null) {
         when { drawer.isOpen -> scope.launch { drawer.close() }; selected != null -> vm.backToList(); else -> vm.showAll() }
     }
@@ -165,7 +169,7 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
                 Brand(30); Spacer(Modifier.width(10.dp)); Text("Herdr", color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 21.sp)
                 Spacer(Modifier.weight(1f)); IconButton(onClick = { scope.launch { drawer.close() } }) { Icon(Icons.Outlined.Close, "Close navigation", tint = Muted) }
             }
-            DrawerRow("All agents", Icons.Outlined.GridView, state.screen == "overview" && state.space == null,
+            DrawerRow("Cockpit", Icons.Outlined.GridView, state.screen == "overview" && state.space == null,
                 trailing = state.machines.values.sumOf { it.terminals.count { t -> t.attention } }.takeIf { it > 0 }?.toString()) { closeDrawer(vm::showAll) }
             Spacer(Modifier.height(14.dp))
             Row(Modifier.fillMaxWidth().height(31.dp).padding(start = 16.dp, end = 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -329,6 +333,12 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
     val all = state.machines.flatMap { (host, machine) -> machine.terminals.filter { it.live }.map { TerminalRef(host, it.address) to it } }
     val scoped = all.filter { (ref, _) -> state.space == null || (ref.hostId == state.space.first && ref.address in space?.addresses.orEmpty()) }
     val shown = scoped.filter { (_, t) -> search.isBlank() || "${t.title} ${t.agent} ${t.cwd} ${t.message}".contains(search, true) }
+    // The cockpit (every machine, no search): what needs the person, then what finished; the rest one tap away.
+    val cockpit = space == null && search.isBlank()
+    val paned = remember(state.machines) { state.machines.flatMap { (h, m) -> m.spaces.flatMap { s -> s.addresses.map { TerminalRef(h, it) } } }.toSet() }
+    val sections = remember(all, paned, state.seen) { Cockpit.sections(all, { it in paned }) { r, t -> Cockpit.seenKey(r, t) in state.seen }.associateBy { it.rank } }
+    fun count(rank: Int) = sections[rank]?.entries?.size ?: 0
+    var everything by rememberSaveable { mutableStateOf(false) }
     // Machines whose connection dropped or failed; their terminal list may be stale.
     val offline = if (state.demo) emptyList() else state.hosts.filter { h -> state.machines[h.id]?.offline == true }
     PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = vm::refreshAll, modifier = Modifier.fillMaxSize()) {
@@ -352,16 +362,21 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
                 Row(verticalAlignment = Alignment.CenterVertically) { Dot(Color(0xffa6bd91)); Spacer(Modifier.width(6.dp)); Text("${state.machines.values.count { it.connected }} connected", color = Muted, fontSize = 12.sp) }
             }
             Spacer(Modifier.height(12.dp))
-            Text(if (space == null) "Agents" else space.name, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-.7).sp)
+            Text(if (space == null) "Cockpit" else space.name, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-.7).sp)
             Spacer(Modifier.height(6.dp))
-            Text(if (scoped.any { it.second.attention }) "A little attention goes a long way." else "Everything you’re working on, in one place.", color = Muted, fontSize = 13.sp)
+            Text(when {
+                space != null -> if (scoped.any { it.second.attention }) "A little attention goes a long way." else "Everything in this space, in one place."
+                count(Cockpit.BLOCKED) == 1 -> "One agent needs you."
+                count(Cockpit.BLOCKED) > 1 -> "${count(Cockpit.BLOCKED)} agents need you."
+                else -> "Nothing needs you right now."
+            }, color = Muted, fontSize = 13.sp)
             Spacer(Modifier.height(24.dp))
             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Surface).border(1.dp, Border, RoundedCornerShape(12.dp)).padding(vertical = 17.dp)) {
-                Stat(scoped.count { it.second.attention }, "Needs you", Blocked, Modifier.weight(1f))
+                Stat(if (space == null) count(Cockpit.BLOCKED) else scoped.count { it.second.attention }, "Needs you", Blocked, Modifier.weight(1f))
                 Box(Modifier.width(1.dp).height(32.dp).background(Border))
-                Stat(scoped.count { it.second.status == "working" }, "Working", Working, Modifier.weight(1f))
+                Stat(if (space == null) count(Cockpit.WORKING) else scoped.count { it.second.status == "working" }, "Working", Working, Modifier.weight(1f))
                 Box(Modifier.width(1.dp).height(32.dp).background(Border))
-                Stat(scoped.count { it.second.status == "done" }, "Done", Done, Modifier.weight(1f))
+                Stat(if (space == null) count(Cockpit.DONE) else scoped.count { (r, t) -> t.status == "done" && Cockpit.seenKey(r, t) !in state.seen }, "Done", Done, Modifier.weight(1f))
             }
             Spacer(Modifier.height(18.dp))
             val focus = LocalFocusManager.current
@@ -372,18 +387,57 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
                 colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Border, focusedBorderColor = Accent, unfocusedContainerColor = Surface))
             Spacer(Modifier.height(8.dp))
         }
-        val groups = listOf("Needs you" to shown.filter { it.second.attention }, "Working" to shown.filter { it.second.status == "working" },
-            "Done" to shown.filter { it.second.status == "done" }, "Ready" to shown.filter { !it.second.attention && it.second.status !in listOf("working", "done") })
-        groups.filter { it.second.isNotEmpty() }.forEach { (title, terminals) ->
-            item {
-                Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    SmallLabel(title); Spacer(Modifier.width(8.dp)); Text(terminals.size.toString(), color = Muted, fontSize = 11.sp)
+        fun location(ref: TerminalRef) = state.machines[ref.hostId]?.spaces?.find { ref.address in it.addresses }?.name ?: vm.hostName(ref.hostId)
+        if (cockpit) {
+            fun section(rank: Int) = sections[rank]?.let { section ->
+                item(key = "section:$rank") { SectionHeader(section.title, section.entries.size) }
+                section.entries.forEach { e ->
+                    item(key = "c:${e.ref.hostId}:${e.ref.address}") {
+                        TerminalCard(e.terminal, location(e.ref), e.ref.address, status = Cockpit.status(e.terminal, Cockpit.seenKey(e.ref, e.terminal) in state.seen).let { word ->
+                            if (e.rank == Cockpit.BLOCKED && word != "blocked") "blocked" else word }) { vm.selectTerminal(e.ref) }
+                    }
+                    items(e.kids, key = { "k:${it.first.hostId}:${it.first.address}" }) { (ref, kid) -> KidRow(kid, ref.address) { vm.selectTerminal(ref) } }
                 }
             }
+            section(Cockpit.BLOCKED); section(Cockpit.DONE)
+            if (sections[Cockpit.BLOCKED] == null && sections[Cockpit.DONE] == null) item {
+                Column(Modifier.fillMaxWidth().padding(vertical = 34.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Outlined.TaskAlt, null, Modifier.size(32.dp), tint = Muted); Spacer(Modifier.height(14.dp))
+                    Text("All clear", fontWeight = FontWeight.Medium); Spacer(Modifier.height(4.dp))
+                    Text("Agents that need you or finish show up here.", color = Muted, fontSize = 13.sp)
+                }
+            }
+            // Working and idle agents, then terminals without a status: the drawer has them too, by space.
+            val listed = sections.values.flatMap { it.entries.map { e -> e.ref } }.toSet()
+            val plain = all.filter { it.first !in listed }
+            val rest = count(Cockpit.WORKING) + count(Cockpit.IDLE) + plain.size
+            if (rest > 0) item(key = "everything") {
+                Row(Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(10.dp)).clickable { everything = !everything }.padding(vertical = 12.dp, horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (everything) "Hide the rest" else "Everything else", color = Accent, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.width(8.dp))
+                    Text(listOfNotNull(count(Cockpit.WORKING).takeIf { it > 0 }?.let { "$it working" }, count(Cockpit.IDLE).takeIf { it > 0 }?.let { "$it idle" },
+                        plain.size.takeIf { it > 0 }?.let { "$it other" }).joinToString(" · "), color = Muted, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                    Icon(if (everything) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, null, Modifier.size(18.dp), tint = Muted)
+                }
+            }
+            if (everything) {
+                section(Cockpit.WORKING); section(Cockpit.IDLE)
+                if (plain.isNotEmpty()) {
+                    item(key = "section:plain") { SectionHeader("Terminals", plain.size) }
+                    items(plain, key = { "p:${it.first.hostId}:${it.first.address}" }) { (ref, t) -> TerminalCard(t, location(ref), ref.address) { vm.selectTerminal(ref) } }
+                }
+            }
+            return@LazyColumn
+        }
+        // A finished agent looked at here counts as idle, as in the cockpit.
+        fun done(e: Pair<TerminalRef, CoreTerminal>) = e.second.status == "done" && Cockpit.seenKey(e.first, e.second) !in state.seen
+        val groups = listOf("Needs you" to shown.filter { it.second.attention }, "Working" to shown.filter { it.second.status == "working" },
+            "Done" to shown.filter(::done), "Ready" to shown.filter { !it.second.attention && it.second.status != "working" && !done(it) })
+        groups.filter { it.second.isNotEmpty() }.forEach { (title, terminals) ->
+            item { SectionHeader(title, terminals.size) }
             items(terminals, key = { "${it.first.hostId}:${it.first.address}" }) { (ref, terminal) ->
-                val machine = state.machines[ref.hostId]
-                val s = machine?.spaces?.find { ref.address in it.addresses }
-                TerminalCard(terminal, s?.name ?: vm.hostName(ref.hostId), ref.address) { vm.selectTerminal(ref) }
+                TerminalCard(terminal, location(ref), ref.address, status = if (done(ref to terminal) || terminal.status != "done") terminal.status else "idle") { vm.selectTerminal(ref) }
             }
         }
         if (shown.isEmpty()) item {
@@ -397,6 +451,29 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
     }
 }
 
+@Composable fun SectionHeader(title: String, count: Int) {
+    Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        SmallLabel(title); Spacer(Modifier.width(8.dp)); Text(count.toString(), color = Muted, fontSize = 11.sp)
+    }
+}
+
+/** A sub-agent that needs the person, under its parent's card. */
+@Composable fun KidRow(t: CoreTerminal, address: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(start = 22.dp).clip(RoundedCornerShape(10.dp)).background(Surface).border(1.dp, Blocked.copy(alpha = .32f), RoundedCornerShape(10.dp))
+        .clickable(onClick = onClick).padding(12.dp, 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("↳", color = Muted, fontSize = 13.sp); Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(t.title, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (t.message.isNotBlank()) Text(t.message, color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Spacer(Modifier.width(8.dp)); Text(statusLabel("blocked", t.kind), color = Blocked, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.width(6.dp)); Text(address, color = Muted.copy(alpha = .6f), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+    }
+}
+
+/** "Needs you", with what kind of answer when the agent said (permission, question, auth). */
+fun statusLabel(word: String, kind: String) = stateName(word).let { if (word == "blocked" && kind.isNotBlank()) "$it · ${kind.replace('_', ' ')}" else it }
+
 @Composable fun Stat(number: Int, text: String, color: Color, modifier: Modifier) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Text(number.toString(), color = color, fontSize = 24.sp, fontWeight = FontWeight.Medium)
@@ -404,9 +481,9 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
     }
 }
 
-@Composable fun TerminalCard(t: CoreTerminal, location: String, address: String, onClick: () -> Unit) {
-    val color = stateColor(t.status)
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Surface).border(1.dp, if (t.attention) Blocked.copy(alpha = .32f) else Border, RoundedCornerShape(12.dp))
+@Composable fun TerminalCard(t: CoreTerminal, location: String, address: String, status: String = t.status, onClick: () -> Unit) {
+    val color = stateColor(status)
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Surface).border(1.dp, if (status == "blocked" || status == "error") Blocked.copy(alpha = .32f) else Border, RoundedCornerShape(12.dp))
         .clickable(onClick = onClick).padding(16.dp), verticalAlignment = Alignment.Top) {
         Box(Modifier.size(35.dp).clip(RoundedCornerShape(9.dp)).background(color.copy(alpha = .09f)), contentAlignment = Alignment.Center) {
             Icon(if (t.agent.lowercase().contains("sh")) Icons.Outlined.Terminal else Icons.Outlined.AutoAwesome, null, Modifier.size(18.dp), tint = color)
@@ -415,7 +492,7 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(t.agent, color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false)); Spacer(Modifier.weight(1f))
-                Dot(color, 6); Spacer(Modifier.width(6.dp)); Text(stateName(t.status), color = color, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                Dot(color, 6); Spacer(Modifier.width(6.dp)); Text(statusLabel(status, t.kind), color = color, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             }
             Spacer(Modifier.height(6.dp)); Text(t.title, fontWeight = FontWeight.Medium, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (t.message.isNotBlank()) { Spacer(Modifier.height(6.dp)); Text(t.message, color = Muted, fontSize = 13.sp, lineHeight = 19.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }

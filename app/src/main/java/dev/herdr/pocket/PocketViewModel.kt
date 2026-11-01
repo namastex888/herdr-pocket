@@ -44,7 +44,9 @@ data class PocketState(
     /** A pairing link that arrived from outside the app, waiting for the person to confirm it. */
     val offeredPairing: PairingLink? = null,
     /** Folded drawer machine groups, as "hostId|machine". */
-    val folded: Set<String> = emptySet()
+    val folded: Set<String> = emptySet(),
+    /** Finished turns the person looked at on the phone ([Cockpit.seenKey]); they leave the cockpit's Done. */
+    val seen: Set<String> = emptySet()
 )
 const val DEFAULT_FONT_SIZE = 13
 val FONT_SIZES = 8..24
@@ -54,7 +56,8 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     val discovery = Discovery(application)
     private val keys = SshKeys(application.noBackupFilesDir)
     private val _state = MutableStateFlow(PocketState(nativeDisplay = prefs.getBoolean("native_display", false),
-        fontSize = prefs.getInt("font_size", DEFAULT_FONT_SIZE).coerceIn(FONT_SIZES), folded = prefs.getStringSet("folded_machines", null).orEmpty().toSet(), hosts = runCatching {
+        fontSize = prefs.getInt("font_size", DEFAULT_FONT_SIZE).coerceIn(FONT_SIZES), folded = prefs.getStringSet("folded_machines", null).orEmpty().toSet(),
+        seen = runCatching { JSONArray(prefs.getString("seen_done", "[]")).let { a -> (0 until a.length()).map(a::getString) }.toSet() }.getOrDefault(emptySet()), hosts = runCatching {
         JSONArray(prefs.getString("hosts", "[]")).objects().map(HostProfile::parse)
     }.getOrDefault(emptyList())))
     val state = _state.asStateFlow()
@@ -552,11 +555,23 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
     fun detach() {
+        markSeen()
         ++attachRevision; attachJob = null
         if (state.value.modifiers.any) _state.update { it.copy(modifiers = KeyModifiers()) }
         nativeJob?.cancel(); nativeJob = null
         val previous = activeChannel; activeChannel = null
         if (previous != null) viewModelScope.launch(Dispatchers.IO) { runCatching { previous.first.detach(previous.second) } }
+    }
+    /** Leaving a finished agent: like the desktop, looking at it turns its done into idle until it finishes another turn. */
+    private fun markSeen() {
+        val ref = state.value.selected ?: return
+        val t = state.value.machines[ref.hostId]?.terminals?.find { it.address == ref.address }?.takeIf { it.status == "done" } ?: return
+        val key = Cockpit.seenKey(ref, t)
+        if (key in state.value.seen) return
+        // Insertion order is kept, so the oldest go first past the cap.
+        val seen = (state.value.seen + key).toList().takeLast(400).toSet()
+        prefs.edit { putString("seen_done", JSONArray(seen.toList()).toString()) }
+        _state.update { it.copy(seen = seen) }
     }
     fun enterDemo() {
         clients.keys.toList().forEach(::disconnect)
