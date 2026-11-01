@@ -1,7 +1,9 @@
 package ai.namastex.automagik
 
 /** What git says about a space's folder, read the way Herdr desktop's spaces-agents sidebar reads it. */
-data class GitInfo(val branch: String?, val ahead: Int, val behind: Int, val top: String, val common: String) {
+data class GitInfo(val branch: String?, val ahead: Int, val behind: Int, val top: String, val common: String,
+                   /** The origin remote as [Projects.remoteKey] writes it ("owner/repo"), or "" when there is none. */
+                   val remote: String = "") {
     /** The folder that holds `.git`, or a bare repository's name without `.git`. */
     val repo: String get() = if (common.endsWith("/.git")) common.removeSuffix("/.git").substringAfterLast('/')
         else common.trimEnd('/').substringAfterLast('/').removeSuffix(".git")
@@ -22,8 +24,11 @@ data class GitInfo(val branch: String?, val ahead: Int, val behind: Int, val top
         val STATUS = listOf("status", "--porcelain=v2", "--branch")
         val REV_PARSE = listOf("rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir")
 
-        /** From [STATUS] and [REV_PARSE] output, both run in [cwd]; null if rev-parse said too little. */
-        fun parse(status: String, revParse: String, cwd: String): GitInfo? {
+        /** Reads the origin's URL; exit 1 with no output means the repository has no origin. */
+        val REMOTE = listOf("config", "--get", "remote.origin.url")
+
+        /** From [STATUS], [REV_PARSE] and [REMOTE] output, all run in [cwd]; null if rev-parse said too little. */
+        fun parse(status: String, revParse: String, cwd: String, remote: String = ""): GitInfo? {
             // git before 2.31 doesn't know --path-format: rev-parse echoes it, and the common dir may come back relative.
             val lines = revParse.lines().map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("--") }
             val top = lines.getOrNull(0)?.trimEnd('/')?.takeIf { it.startsWith("/") } ?: return null
@@ -36,7 +41,7 @@ data class GitInfo(val branch: String?, val ahead: Int, val behind: Int, val top
                     ahead = a; behind = b
                 }
             }
-            return GitInfo(branch, ahead, behind, top, common)
+            return GitInfo(branch, ahead, behind, top, common, Projects.remoteKey(remote).orEmpty())
         }
 
         fun absolute(path: String, cwd: String): String {

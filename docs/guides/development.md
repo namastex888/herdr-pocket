@@ -108,7 +108,7 @@ App code, `android/app/src/main/java/ai/namastex/automagik/`:
 | `Ssh.kt` | Ed25519 key, host key pinning, SSH transport |
 | `IrohLink.kt`, `PairScreens.kt` | Pocket Link pairing and sessions |
 | `PocketViewModel.kt` | Connections, inventory, selection, terminal lifecycle, input order |
-| `MainActivity.kt`, `Screens.kt`, `Cockpit.kt`, `Sidebar*.kt` | Compose UI |
+| `MainActivity.kt`, `Screens.kt`, `ProjectScreens.kt`, `Cockpit.kt`, `Projects.kt`, `Nav.kt`, `Sidebar*.kt` | Compose UI |
 | `TerminalScreen.kt`, `assets/terminal/` | Terminal view and its key and message controls |
 | `KeyInput.kt`, `TerminalModes.kt` | Key row modifiers, cursor and paste encoding |
 | `Notify.kt`, `Alerts.kt`, `Prompt.kt`, `WatchService.kt` | Notifications, buttons, background watch |

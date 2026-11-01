@@ -43,7 +43,9 @@ More detail: [docs/guides/using.md](docs/guides/using.md).
 
 ## What it does
 
-- **Cockpit:** agents that need you first, then the ones that finished, across your machines.
+- **Today:** agents that need you first, then the ones that finished, across your machines.
+- **Projects:** your spaces grouped by git repository, with the desktop's spaces tree one tap away.
+- **Tasks:** agents by branch, needs you first.
 - **Terminals:** any agent full screen, with its tabs, a key row and a message composer.
 - **Alerts:** Android notifications for Needs you and Done, with Reply, Yes/No and answer buttons,
   also while the app is open.

@@ -35,7 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.foundation.text.KeyboardActions
@@ -51,7 +51,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import kotlinx.coroutines.launch
 import java.util.UUID
 
 
@@ -96,11 +95,9 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
     Text(text.uppercase(), modifier, color = Muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.4.sp)
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable fun PocketApp(vm: PocketViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
-    val drawer = rememberDrawerState(DrawerValue.Closed)
-    val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     var addHost by remember { mutableStateOf(false) }
     var pairDesktop by remember { mutableStateOf(false) }
@@ -115,24 +112,32 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
     val selected = state.selected
     val space = state.space?.let { (host, id) -> state.machines[host]?.spaces?.find { it.id == id } }
     val terminal = selected?.let { state.machines[it.hostId]?.terminals?.find { t -> t.address == it.address } }
+    // The open terminal's own space, for its tabs; the space screen under it may be another one or none.
+    val terminalSpace = selected?.let { ref -> state.machines[ref.hostId]?.spaces?.find { ref.address in it.addresses } }
     val immersive = selected != null && state.terminalFullscreen
     val activity = LocalActivity.current
     val view = LocalView.current
-    DisposableEffect(immersive, drawer.isOpen) {
+    DisposableEffect(immersive) {
         val bars = activity?.window?.let { WindowCompat.getInsetsController(it, view) }
         bars?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        if (immersive && !drawer.isOpen) bars?.hide(WindowInsetsCompat.Type.systemBars())
+        if (immersive) bars?.hide(WindowInsetsCompat.Type.systemBars())
         else bars?.show(WindowInsetsCompat.Type.systemBars())
         onDispose { bars?.show(WindowInsetsCompat.Type.systemBars()) }
     }
-    val welcome = selected == null && state.screen == "overview" && state.machines.values.none { it.connected || it.terminals.isNotEmpty() }
-    val browsing = !state.demo && (welcome || (selected == null && state.screen == "machines"))
+    val disconnected = state.machines.values.none { it.connected || it.terminals.isNotEmpty() }
+    val welcome = selected == null && state.screen == Nav.TODAY && state.space == null && disconnected
+    val browsing = !state.demo && (welcome || (selected == null && state.screen == Nav.MACHINES))
+    // Hosts in the order they were saved, then any others: what the spaces tree, Projects and Tasks read.
+    val sidebar = state.hosts.mapNotNull { h -> state.machines[h.id]?.let { m -> SidebarHost(h.id, h.name, m.connected, m.spaces, m.terminals, m.linked, m.colors, m.git) } } +
+        state.machines.filterKeys { id -> state.hosts.none { it.id == id } }.map { (id, m) -> SidebarHost(id, vm.hostName(id), m.connected, m.spaces, m.terminals, m.linked, m.colors, m.git) }
+    val pulse = remember(sidebar, state.seen) { Projects.pulse(sidebar, state.seen) }
     DisposableEffect(browsing) { if (browsing) vm.discovery.start(); onDispose { vm.discovery.stop() } }
     val discovered by vm.discovery.hosts.collectAsStateWithLifecycle()
     val nearby = (listOfNotNull(Discovery.emulatorHost) + discovered).filter { n -> state.hosts.none { it.host == n.host && it.port == n.port } }
     fun addNearby(n: NearbyHost) { addPrefill = n.prefill(); addHost = true }
-    // Git tails refresh while the drawer is open.
-    LaunchedEffect(drawer) { snapshotFlow { drawer.targetValue == DrawerValue.Open }.collect(vm::drawerOpen) }
+    // Repositories and branches re-check every minute while a screen shows them; otherwise only when work stops.
+    val gitScreen = selected == null && (state.screen == Nav.PROJECTS || state.screen == Nav.TASKS)
+    LaunchedEffect(gitScreen) { vm.gitShown(gitScreen) }
     LaunchedEffect(state.message) { state.message?.let { snackbar.showSnackbar(it); vm.dismissMessage() } }
     // Self-update: offer each new build once, open Android's install prompt, and continue after the install permission screen.
     val update by Updater.state.collectAsStateWithLifecycle()
@@ -161,83 +166,68 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
         if (CrashLog.announce() && snackbar.showSnackbar("Automagik closed unexpectedly last time", "Report", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed)
             vm.navigate("settings")
     }
-    BackHandler(drawer.isOpen || selected != null || state.screen != "overview" || state.space != null) {
-        when { drawer.isOpen -> scope.launch { drawer.close() }; selected != null -> vm.backToList(); else -> vm.showAll() }
-    }
-    fun closeDrawer(action: () -> Unit) { action(); scope.launch { drawer.close() } }
-    ModalNavigationDrawer(drawerState = drawer, gesturesEnabled = selected == null || drawer.isOpen, drawerContent = {
-        ModalDrawerSheet(Modifier.width(310.dp), drawerContainerColor = SidebarChrome) {
-            Row(Modifier.fillMaxWidth().padding(22.dp, 22.dp, 14.dp, 26.dp), verticalAlignment = Alignment.CenterVertically) {
-                Brand(30); Spacer(Modifier.width(10.dp)); Text("Automagik", color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 21.sp)
-                Spacer(Modifier.weight(1f)); IconButton(onClick = { scope.launch { drawer.close() } }) { Icon(Icons.Outlined.Close, "Close navigation", tint = Muted) }
+    BackHandler(selected != null || state.screen != Nav.TODAY || state.space != null || state.project != null) { vm.back() }
+    val project = state.project?.let { key -> pulse.projects.find { it.key == key } }
+    val root = selected == null && state.space == null && state.project == null && state.screen in Nav.TABS
+    // Kept here, not in the tabs, so a terminal opened from a tab comes back to the same view of it.
+    var spacesTree by rememberSaveable { mutableStateOf(false) }
+    var taskFilter by rememberSaveable { mutableStateOf<String?>(null) }
+    val keyboard = WindowInsets.isImeVisible
+    Scaffold(containerColor = Canvas, snackbarHost = { SnackbarHost(snackbar) },
+        modifier = Modifier.imePadding(),
+        contentWindowInsets = if (immersive) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
+        topBar = {
+            if (!immersive) Column(Modifier.background(Chrome).statusBarsPadding()) {
+                Row(Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (selected == null && !root) IconButton(onClick = { vm.back() }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") }
+                    else if (selected == null) { Spacer(Modifier.width(8.dp)); Brand(25); Spacer(Modifier.width(11.dp)) }
+                    else Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        val (title, subtitle) = when {
+                            selected != null -> (terminal?.title ?: selected.address) to (terminalSpace?.name ?: "Terminal")
+                            space != null -> space.name to "Space"
+                            project != null -> project.name to project.remote.ifBlank { null }
+                            state.screen == Nav.SETTINGS -> "Settings" to null
+                            state.screen == Nav.MACHINES -> "Machines" to "${pulse.machines} connected"
+                            state.screen == Nav.PROJECTS -> "Projects" to pulse.projects.size.let { if (it == 1) "1 project" else "$it projects" }
+                            state.screen == Nav.TASKS -> "Tasks" to pulse.tasks.size.let { if (it == 1) "1 task" else "$it tasks" }
+                            else -> "Today" to "${pulse.machines} ${if (pulse.machines == 1) "machine" else "machines"} · ${pulse.spaces} ${if (pulse.spaces == 1) "space" else "spaces"}"
+                        }
+                        Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        subtitle?.let { Text(it, fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    }
+                    if (selected != null) {
+                        IconButton(onClick = { vm.setTerminalFullscreen(true) }) { Icon(Icons.Outlined.Fullscreen, "Full screen terminal", tint = Accent) }
+                        IconButton(onClick = vm::backToList) { Icon(Icons.Outlined.Close, "Back to agents", tint = Muted) }
+                    }
+                    if (root && state.screen == Nav.TODAY && state.machines.values.any { it.connected } && !state.demo)
+                        IconButton(onClick = { newTerminal = true }) { Icon(Icons.Outlined.Add, "New terminal", tint = Accent) }
+                    if (root && state.screen == Nav.MACHINES) IconButton(onClick = { addHost = true }) { Icon(Icons.Outlined.Add, "Add machine", tint = Accent) }
+                    if (root) IconButton(onClick = { vm.navigate(Nav.SETTINGS) }) { Icon(Icons.Outlined.Settings, "Settings", tint = Muted) }
+                }
+                (update as? UpdateState.Downloading)?.let { LinearProgressIndicator(progress = { it.progress }, Modifier.fillMaxWidth().height(2.dp), color = Accent, trackColor = Border) }
+                    ?: HorizontalDivider(color = Border)
+                if (state.demo) Row(Modifier.fillMaxWidth().background(Accent.copy(alpha = .09f)).padding(start = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Interface preview · sample data", color = Accent, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                    TextButton(onClick = vm::leaveDemo) { Text("Exit", fontSize = 12.sp) }
+                }
             }
-            DrawerRow("Cockpit", Icons.Outlined.GridView, state.screen == "overview" && state.space == null,
-                trailing = state.machines.values.sumOf { it.terminals.count { t -> t.attention } }.takeIf { it > 0 }?.toString()) { closeDrawer(vm::showAll) }
-            Spacer(Modifier.height(14.dp))
-            Row(Modifier.fillMaxWidth().height(31.dp).padding(start = 16.dp, end = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Spaces", color = SidebarDim, fontSize = 11.5.sp)
-            }
-            // Hosts in the order they were saved; each connection's spaces as the desktop groups and orders them.
-            val sidebar = state.hosts.mapNotNull { h -> state.machines[h.id]?.let { m -> SidebarHost(h.id, h.name, m.connected, m.spaces, m.terminals, m.linked, m.colors, m.git) } } +
-                state.machines.filterKeys { id -> state.hosts.none { it.id == id } }.map { (id, m) -> SidebarHost(id, vm.hostName(id), m.connected, m.spaces, m.terminals, m.linked, m.colors, m.git) }
+        },
+        // The terminal has the whole screen; the keyboard has the bar's place while it is up.
+        bottomBar = { if (Nav.barShown(Nav.Place(state.screen, state.project, state.space, selected)) && !keyboard) PocketTabs(state.screen, pulse.needsYou) { vm.navigate(it) } }
+    ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding)) {
             val rows = remember(sidebar, state.folded) { Sidebar.rows(sidebar, vm.programs, state.folded) }
-            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 14.dp)) {
-                sidebarRows(rows, state.space, state.selected, onToggle = { vm.toggleFold(it.key.removePrefix("m:")) },
-                    onSpace = { closeDrawer { vm.selectSpace(it.hostId, it.space.id) } },
-                    onTerminal = { closeDrawer { vm.selectTerminal(it) } })
-                if (state.machines.values.all { it.spaces.isEmpty() }) item {
-                    Text("Your spaces appear here when you connect.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(24.dp, 12.dp))
-                }
-            }
-            HorizontalDivider(color = Border, modifier = Modifier.padding(horizontal = 18.dp))
-            Spacer(Modifier.height(12.dp))
-            DrawerRow("Machines", Icons.Outlined.Computer, state.screen == "machines") { closeDrawer { vm.navigate("machines") } }
-            DrawerRow("Settings", Icons.Outlined.Settings, state.screen == "settings") { closeDrawer { vm.navigate("settings") } }
-            Row(Modifier.fillMaxWidth().padding(24.dp, 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.Lock, null, Modifier.size(12.dp), tint = Muted); Spacer(Modifier.width(6.dp))
-                Text("herdr-core · SSH", fontSize = 12.sp, color = Muted)
-                Spacer(Modifier.weight(1f)); Text(BuildConfig.VERSION_NAME, color = Muted, fontSize = 11.sp)
-            }
-        }
-    }) {
-        Scaffold(containerColor = Canvas, snackbarHost = { SnackbarHost(snackbar) },
-            modifier = Modifier.imePadding(),
-            contentWindowInsets = if (immersive) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
-            topBar = {
-                if (!immersive) Column(Modifier.background(Chrome).statusBarsPadding()) {
-                    Row(Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { scope.launch { drawer.open() } }) { Icon(Icons.Outlined.Menu, "Open navigation") }
-                        if (selected == null) { Brand(25); Spacer(Modifier.width(9.dp)) }
-                        Column(Modifier.weight(1f)) {
-                            Text(when { selected != null -> terminal?.title ?: selected.address; state.screen == "machines" -> "Machines"; state.screen == "settings" -> "Settings"; space != null -> space.name; else -> "Herdr" },
-                                fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            if (selected != null) Text(space?.name ?: "Terminal", fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        if (selected != null) IconButton(onClick = { vm.setTerminalFullscreen(true) }) { Icon(Icons.Outlined.Fullscreen, "Full screen terminal", tint = Accent) }
-                        if (selected != null) IconButton(onClick = vm::backToList) { Icon(Icons.Outlined.Close, "Back to agents", tint = Muted) }
-                        else if (state.screen == "overview" && state.machines.values.any { it.connected } && !state.demo)
-                            IconButton(onClick = { newTerminal = true }) { Icon(Icons.Outlined.Add, "New terminal", tint = Accent) }
-                        else if (state.screen == "machines") IconButton(onClick = { addHost = true }) { Icon(Icons.Outlined.Add, "Add machine", tint = Accent) }
-                        else Surface(color = Raised, shape = RoundedCornerShape(5.dp), modifier = Modifier.padding(end = 14.dp)) {
-                            Text("POCKET", color = Muted, fontSize = 9.sp, letterSpacing = 1.sp, modifier = Modifier.padding(7.dp, 4.dp))
-                        }
-                    }
-                    (update as? UpdateState.Downloading)?.let { LinearProgressIndicator(progress = { it.progress }, Modifier.fillMaxWidth().height(2.dp), color = Accent, trackColor = Border) }
-                        ?: HorizontalDivider(color = Border)
-                    if (state.demo) Row(Modifier.fillMaxWidth().background(Accent.copy(alpha = .09f)).padding(start = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Interface preview · sample data", color = Accent, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                        TextButton(onClick = vm::leaveDemo) { Text("Exit", fontSize = 12.sp) }
-                    }
-                }
-            }) { padding ->
-            Box(Modifier.fillMaxSize().padding(padding)) {
-                when {
-                    selected != null -> TerminalScreen(vm, state, terminal, space) { scope.launch { drawer.open() } }
-                    state.screen == "machines" -> MachinesScreen(state, nearby, onAdd = { addHost = true }, onPair = { pairDesktop = true }, onAddNearby = ::addNearby, onConnect = { vm.connect(it) }, onEdit = { editHost = it }, onDisconnect = { vm.disconnect(it) }, onRemove = vm::removeHost)
-                    state.screen == "settings" -> SettingsScreen(state, vm)
-                    state.machines.values.none { it.connected || it.terminals.isNotEmpty() } -> WelcomeScreen(state, nearby, onAdd = { addHost = true }, onPair = { pairDesktop = true }, onAddNearby = ::addNearby, onConnect = { vm.connect(it) }, onPreview = vm::enterDemo)
-                    else -> OverviewScreen(state, space, vm, onAll = vm::showAll)
-                }
+            when {
+                selected != null -> TerminalScreen(vm, state, terminal, terminalSpace)
+                space != null -> OverviewScreen(state, space, vm, pulse, onAll = vm::showAll)
+                state.screen == Nav.MACHINES -> MachinesScreen(state, nearby, onAdd = { addHost = true }, onPair = { pairDesktop = true }, onAddNearby = ::addNearby, onConnect = { vm.connect(it) }, onEdit = { editHost = it }, onDisconnect = { vm.disconnect(it) }, onRemove = vm::removeHost)
+                state.screen == Nav.SETTINGS -> SettingsScreen(state, vm)
+                state.screen == Nav.PROJECTS && project != null -> ProjectScreen(state, vm, project, pulse, remember(rows, project) { Projects.tree(rows, project) })
+                state.screen == Nav.PROJECTS -> ProjectsScreen(state, vm, pulse, rows, spacesTree) { spacesTree = it }
+                state.screen == Nav.TASKS -> TasksScreen(vm, pulse, taskFilter) { taskFilter = it }
+                disconnected -> WelcomeScreen(state, nearby, onAdd = { addHost = true }, onPair = { pairDesktop = true }, onAddNearby = ::addNearby, onConnect = { vm.connect(it) }, onPreview = vm::enterDemo)
+                else -> OverviewScreen(state, null, vm, pulse, onAll = vm::showAll)
             }
         }
     }
@@ -261,13 +251,22 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
     }
 }
 
-@Composable fun DrawerRow(text: String, icon: ImageVector, selected: Boolean, trailing: String? = null, onClick: () -> Unit) {
-    Row(Modifier.padding(horizontal = 12.dp, vertical = 2.dp).fillMaxWidth().clip(RoundedCornerShape(9.dp))
-        .background(if (selected) Accent.copy(alpha = .12f) else Color.Transparent).clickable(onClick = onClick).padding(12.dp, 13.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, Modifier.size(18.dp), tint = if (selected) Accent else Muted); Spacer(Modifier.width(12.dp))
-        Text(text, Modifier.weight(1f), color = if (selected) Accent else Ink, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        trailing?.let { Text(it, fontSize = 12.sp, color = if (selected) Accent else Muted) }
+/** The bottom bar: Today, Projects, Tasks, Machines. Today carries how many agents need the person. */
+@Composable fun PocketTabs(current: String, needsYou: Int, onTab: (String) -> Unit) {
+    Column {
+        HorizontalDivider(color = Border)
+        NavigationBar(containerColor = Chrome, tonalElevation = 0.dp) {
+            listOf(Triple(Nav.TODAY, "Today", Icons.Outlined.Home), Triple(Nav.PROJECTS, "Projects", Icons.Outlined.GridView),
+                Triple(Nav.TASKS, "Tasks", Icons.Outlined.Checklist), Triple(Nav.MACHINES, "Machines", Icons.Outlined.Computer)).forEach { (screen, label, icon) ->
+                NavigationBarItem(selected = current == screen, onClick = { onTab(screen) }, label = { Text(label, fontSize = 12.sp) },
+                    icon = {
+                        if (screen == Nav.TODAY && needsYou > 0) BadgedBox(badge = { Badge(containerColor = Blocked, contentColor = OnAccent) { Text(needsYou.toString()) } }) { Icon(icon, null) }
+                        else Icon(icon, null)
+                    },
+                    colors = NavigationBarItemDefaults.colors(selectedIconColor = Accent, selectedTextColor = Accent, indicatorColor = Accent.copy(alpha = .12f),
+                        unselectedIconColor = Muted, unselectedTextColor = Muted))
+            }
+        }
     }
 }
 
@@ -330,15 +329,14 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable fun OverviewScreen(state: PocketState, space: PocketSpace?, vm: PocketViewModel, onAll: () -> Unit) {
+@Composable fun OverviewScreen(state: PocketState, space: PocketSpace?, vm: PocketViewModel, pulse: Projects.Pulse, onAll: () -> Unit) {
     var search by remember { mutableStateOf("") }
     val all = state.machines.flatMap { (host, machine) -> machine.terminals.filter { it.live }.map { TerminalRef(host, it.address) to it } }
-    val scoped = all.filter { (ref, _) -> state.space == null || (ref.hostId == state.space.first && ref.address in space?.addresses.orEmpty()) }
+    val scoped = all.filter { (ref, _) -> space == null || (ref.hostId == state.space?.first && ref.address in space.addresses) }
     val shown = scoped.filter { (_, t) -> search.isBlank() || "${t.title} ${t.agent} ${t.cwd} ${t.message}".contains(search, true) }
     // The cockpit (every machine, no search): what needs the person, then what finished; the rest one tap away.
     val cockpit = space == null && search.isBlank()
-    val paned = remember(state.machines) { state.machines.flatMap { (h, m) -> m.spaces.flatMap { s -> s.addresses.map { TerminalRef(h, it) } } }.toSet() }
-    val sections = remember(all, paned, state.seen) { Cockpit.sections(all, { it in paned }) { r, t -> Cockpit.seenKey(r, t) in state.seen }.associateBy { it.rank } }
+    val sections = remember(pulse) { pulse.sections.associateBy { it.rank } }
     fun count(rank: Int) = sections[rank]?.entries?.size ?: 0
     var everything by rememberSaveable { mutableStateOf(false) }
     // Machines whose connection dropped or failed; their terminal list may be stale.
@@ -358,27 +356,37 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
                 else TextButton(onClick = { vm.reconnect(host.id) }) { Text("Reconnect") }
             }
         }
-        item {
+        // Today: three counts and nothing else above the agents (spend joins them once the usage meter reports it).
+        if (space == null) item(key = "today") {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CountCard(pulse.needsYou, if (pulse.needsYou == 1) "needs you" else "need you", Blocked, Modifier.weight(1f))
+                CountCard(pulse.working, "working", Working, Modifier.weight(1f))
+                CountCard(pulse.machines, "connected", Ink, Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(12.dp))
+            val focus = LocalFocusManager.current
+            OutlinedTextField(value = search, onValueChange = { search = it }, placeholder = { Text("Find an agent or terminal…", fontSize = 14.sp) },
+                leadingIcon = { Icon(Icons.Outlined.Search, null, Modifier.size(18.dp)) }, singleLine = true, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth(),
+                trailingIcon = { if (search.isNotEmpty()) IconButton(onClick = { search = "" }) { Icon(Icons.Outlined.Close, "Clear search", Modifier.size(18.dp)) } },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { focus.clearFocus() }),
+                colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Border, focusedBorderColor = Accent, unfocusedContainerColor = Surface))
+        }
+        if (space != null) item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                SmallLabel(if (space == null) "All machines" else space.folder.ifBlank { "Space" }, Modifier.weight(1f))
+                SmallLabel(space.folder.ifBlank { "Space" }, Modifier.weight(1f))
                 Row(verticalAlignment = Alignment.CenterVertically) { Dot(Ok); Spacer(Modifier.width(6.dp)); Text("${state.machines.values.count { it.connected }} connected", color = Muted, fontSize = 12.sp) }
             }
             Spacer(Modifier.height(12.dp))
-            Text(if (space == null) "Cockpit" else space.name, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-.7).sp)
+            Text(space.name, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-.7).sp)
             Spacer(Modifier.height(6.dp))
-            Text(when {
-                space != null -> if (scoped.any { it.second.attention }) "A little attention goes a long way." else "Everything in this space, in one place."
-                count(Cockpit.BLOCKED) == 1 -> "One agent needs you."
-                count(Cockpit.BLOCKED) > 1 -> "${count(Cockpit.BLOCKED)} agents need you."
-                else -> "Nothing needs you right now."
-            }, color = Muted, fontSize = 13.sp)
+            Text(if (scoped.any { it.second.attention }) "A little attention goes a long way." else "Everything in this space, in one place.", color = Muted, fontSize = 13.sp)
             Spacer(Modifier.height(24.dp))
             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Surface).border(1.dp, Border, RoundedCornerShape(12.dp)).padding(vertical = 17.dp)) {
-                Stat(if (space == null) count(Cockpit.BLOCKED) else scoped.count { it.second.attention }, "Needs you", Blocked, Modifier.weight(1f))
+                Stat(scoped.count { it.second.attention }, "Needs you", Blocked, Modifier.weight(1f))
                 Box(Modifier.width(1.dp).height(32.dp).background(Border))
-                Stat(if (space == null) count(Cockpit.WORKING) else scoped.count { it.second.status == "working" }, "Working", Working, Modifier.weight(1f))
+                Stat(scoped.count { it.second.status == "working" }, "Working", Working, Modifier.weight(1f))
                 Box(Modifier.width(1.dp).height(32.dp).background(Border))
-                Stat(if (space == null) count(Cockpit.DONE) else scoped.count { (r, t) -> t.status == "done" && Cockpit.seenKey(r, t) !in state.seen }, "Done", Done, Modifier.weight(1f))
+                Stat(scoped.count { (r, t) -> t.status == "done" && Cockpit.seenKey(r, t) !in state.seen }, "Done", Done, Modifier.weight(1f))
             }
             Spacer(Modifier.height(18.dp))
             val focus = LocalFocusManager.current
@@ -409,7 +417,7 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
                     Text("Agents that need you or finish show up here.", color = Muted, fontSize = 13.sp)
                 }
             }
-            // Working and idle agents, then terminals without a status: the drawer has them too, by space.
+            // Working and idle agents, then terminals without a status: Projects has them too, by space.
             val listed = sections.values.flatMap { it.entries.map { e -> e.ref } }.toSet()
             val plain = all.filter { it.first !in listed }
             val rest = count(Cockpit.WORKING) + count(Cockpit.IDLE) + plain.size
@@ -475,6 +483,14 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
 
 /** "Needs you", with what kind of answer when the agent said (permission, question, auth). */
 fun statusLabel(word: String, kind: String) = stateName(word).let { if (word == "blocked" && kind.isNotBlank()) "$it · ${kind.replace('_', ' ')}" else it }
+
+/** A count in a small card, as Today's header and a project's show them. */
+@Composable fun CountCard(number: Int, text: String, color: Color, modifier: Modifier = Modifier) {
+    Column(modifier.clip(RoundedCornerShape(12.dp)).background(Surface).border(1.dp, Border, RoundedCornerShape(12.dp)).padding(12.dp, 10.dp)) {
+        Text(number.toString(), color = color, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+        Text(text, color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
 
 @Composable fun Stat(number: Int, text: String, color: Color, modifier: Modifier) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {

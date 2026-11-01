@@ -27,12 +27,22 @@ Everything the [README](../../README.md) keeps short. Install and first connecti
 - While the start screen or **Machines** is open, the app lists computers on the same network that
   advertise SSH.
 
-## Cockpit and drawer
+## Tabs
 
-- The Cockpit lists the agents that need you first, then the ones that finished, across every
-  connected machine.
-- The hamburger drawer is Herdr desktop's sidebar: spaces, their agents, git branch tails and
+The bottom bar has four tabs. It hides while a terminal is open, and Back from a terminal returns
+to the tab you opened it from. Back on any other tab goes to Today. **Settings** is the gear at the
+top.
+
+- **Today** lists the agents that need you first, then the ones that finished, across every
+  connected machine. The counts at the top are needs you, working and machines connected.
+- **Projects** has one card per git repository. Spaces in the same repository, like a squad's
+  worktrees, share one card. A folder that isn't a repository is a project of its own. Tap a card
+  for its tasks, spaces and agents.
+- **Projects → Spaces** is Herdr desktop's sidebar: spaces, their agents, git branch tails and
   nested worktrees, with the desktop's own program icons.
+- **Tasks** groups agents by branch: Needs you, Working, Done, then Idle. Work on `main`, `master`
+  or `dev`, or with no branch, is the project's **Untasked** row.
+- **Machines** lists your machines, with **Pair with Herdr desktop** and **Add machine**.
 - Space names, tab order and splits come from the desktop's `herdr-app` document, including
   machines that a core forwards.
 - Pull down on the list to refresh or retry. A dropped connection shows **Reconnect**.

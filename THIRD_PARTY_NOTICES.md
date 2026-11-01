@@ -14,4 +14,4 @@ JUnit and JSON-java are used only by tests and are not shipped in the APK.
 - **AndroidSVG 1.4**: Paul LeBeau (Cave Rock Software), Apache License 2.0. <https://github.com/BigBadaboom/androidsvg>.
 - **Lucide `git-branch` glyph** (drawn in code for nested worktree rows): Lucide contributors, ISC License. <https://github.com/lucide-icons/lucide/blob/main/LICENSE>.
 
-Program icons in the drawer are not bundled: the app reads them at runtime from the person's own Herdr desktop (its `icons/` folder) and keeps a copy on the phone. Their artwork licences and any trademarks stay with their owners.
+Program icons in the spaces tree are not bundled: the app reads them at runtime from the person's own Herdr desktop (its `icons/` folder) and keeps a copy on the phone. Their artwork licences and any trademarks stay with their owners.

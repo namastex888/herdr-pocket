@@ -28,7 +28,7 @@ Effective 2026-11-01. Applies to the Android app **Automagik Pocket** (app ID
 | Machine details: name, hostname, SSH user, port, session name, host key fingerprint | Stays on the phone | To reconnect |
 | SSH password | Sent to that machine when it asks; **never saved** | To log in when the key is refused |
 | The phone's make and model (for example "Pixel 8") | Sent once to the desktop you pair with | So the desktop can name the paired phone |
-| Folder git status and Herdr desktop program icons | Read from your machine, icons cached on the phone | To draw the drawer like the desktop |
+| Folder git status, origin remote URL and Herdr desktop program icons | Read from your machine; the git answers stay in memory, icons cached on the phone | To draw the spaces tree like the desktop, and to group spaces into projects and branches into tasks |
 | Update check (app version in the request) | GitHub | To offer a newer release |
 
 Nothing else is collected. We, the developers, receive none of this data.

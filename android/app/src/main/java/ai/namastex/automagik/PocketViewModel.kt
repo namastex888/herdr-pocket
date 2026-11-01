@@ -32,7 +32,9 @@ data class TerminalRef(val hostId: String, val address: String)
 data class PasswordPrompt(val hostId: String, val rejected: Boolean)
 data class PocketState(
     val hosts: List<HostProfile> = emptyList(), val machines: Map<String, MachineState> = emptyMap(),
-    val screen: String = "overview", val space: Pair<String, String>? = null, val selected: TerminalRef? = null,
+    /** The bottom tab or Settings ([Nav]); [project] ([Projects.Project.key]) and [space] are open over it, [selected] over all. */
+    val screen: String = Nav.TODAY, val space: Pair<String, String>? = null, val selected: TerminalRef? = null,
+    val project: String? = null,
     val publicKey: String = "", val trust: HostTrustRequired? = null, val message: String? = null,
     val terminalStatus: String = "", val demo: Boolean = false, val sending: Boolean = false,
     val nativeDisplay: Boolean = false, val screenText: String = "",
@@ -75,15 +77,16 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     private val colorsRead = ConcurrentHashMap<String, Long>()
     private val homes = ConcurrentHashMap<String, String>()
     private val herdrHomes = ConcurrentHashMap<String, String>()
-    // Git for the drawer runs in its own slow loop, never in the event refresh: one pass after connecting, a re-check when
-    // a terminal stops working, and the desktop's 60 s fallback only while the drawer is open.
+    // Git for the spaces tree, projects and tasks runs in its own slow loop, never in the event refresh: one pass after
+    // connecting, a re-check when a terminal stops working, and the desktop's 60 s fallback only while a screen that
+    // shows repositories or branches is open. Only in the foreground, and only reading: the phone never changes a repo.
     private val gitWake = Channel<Unit>(Channel.CONFLATED)
     private val gitChecked = ConcurrentHashMap<String, Long>()
     private val gitDirty: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private val wasWorking = ConcurrentHashMap<String, Set<String>>()
-    @Volatile private var drawerOpen = false
+    @Volatile private var gitShown = false
     private val iconsTried: MutableSet<String> = ConcurrentHashMap.newKeySet()
-    fun drawerOpen(open: Boolean) { drawerOpen = open; if (open) gitWake.trySend(Unit) }
+    fun gitShown(shown: Boolean) { gitShown = shown; if (shown) gitWake.trySend(Unit) }
     fun toggleFold(key: String) {
         val folded = state.value.folded.let { if (key in it) it - key else it + key }
         prefs.edit { putStringSet("folded_machines", folded) }
@@ -151,21 +154,35 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         saveHosts(state.value.hosts.filter { it.id != id })
         _state.update { it.copy(machines = it.machines - id) }
     }
-    fun navigate(screen: String) { detach(); _state.update { it.copy(screen = screen, selected = null, space = null) } }
+    /** A tab (or Settings), opened at its top. */
+    fun navigate(screen: String) { place(Nav.tab(screen)) }
+    private fun place(p: Nav.Place) {
+        if (p.selected == null) detach()
+        _state.update { it.copy(screen = p.screen, project = p.project, space = p.space, selected = p.selected,
+            terminalStatus = if (p.selected == null) "" else it.terminalStatus) }
+    }
+    /** One step back by [Nav.back]; false when there is nowhere further back to go. */
+    fun back(): Boolean {
+        val s = state.value
+        val to = Nav.back(Nav.Place(s.screen, s.project, s.space, s.selected)) ?: return false
+        place(to); return true
+    }
+    /** A space's agents, over the tab that showed it. */
     fun selectSpace(hostId: String, spaceId: String) {
         detach()
-        _state.update { it.copy(screen = "overview", space = hostId to spaceId, selected = null) }
+        _state.update { it.copy(space = hostId to spaceId, selected = null) }
     }
+    fun openProject(key: String) { detach(); _state.update { it.copy(screen = Nav.PROJECTS, project = key, space = null, selected = null) } }
     fun setTerminalFullscreen(fullscreen: Boolean) { _state.update { it.copy(terminalFullscreen = fullscreen) } }
     fun selectTerminal(ref: TerminalRef) {
         Notify.cancel(getApplication(), ref)
         if (state.value.selected == ref) return
         detach()
-        val space = state.value.machines[ref.hostId]?.spaces?.find { ref.address in it.addresses }
-        _state.update { it.copy(screen = "overview", selected = ref, space = space?.let { s -> ref.hostId to s.id }, terminalStatus = "Connecting terminal…", screenText = "", terminalFullscreen = true, nativeAlternateScreen = false) }
+        // The terminal covers the tab it was opened from, which stays as it was for Back.
+        _state.update { it.copy(selected = ref, terminalStatus = "Connecting terminal…", screenText = "", terminalFullscreen = true, nativeAlternateScreen = false) }
     }
     fun backToList() { detach(); _state.update { it.copy(selected = null, terminalStatus = "") } }
-    fun showAll() { detach(); _state.update { it.copy(screen = "overview", selected = null, space = null) } }
+    fun showAll() { navigate(Nav.TODAY) }
 
     /** [retry]: a background reconnect's attempt number; a failure schedules the next. */
     fun connect(profile: HostProfile, password: String? = null, retry: Int = 0) {
@@ -482,20 +499,25 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         val byAddress = m.terminals.associateBy { it.address }
         val working = m.terminals.filter { it.status == "working" }.map { it.address }.toSet()
         val stopped = wasWorking.put(id, working).orEmpty() - working
-        val places = m.spaces.groupBy({ it.machine to Sidebar.place(it, byAddress) }) { it }
-        for ((where, spaces) in places) {
+        // Each space's folder, and each agent's own working directory (a worktree can be another task's branch), by the
+        // terminals whose stopping should re-check it.
+        val places = LinkedHashMap<Pair<String, String>, MutableSet<String>>()
+        for (s in m.spaces) places.getOrPut(s.machine to Sidebar.place(s, byAddress)) { HashSet() } += s.addresses
+        for (t in m.terminals) if (t.live && t.status.isNotBlank() && t.cwd.isNotBlank())
+            places.getOrPut(t.address.substringBefore('/', "") to t.cwd) { HashSet() } += t.address
+        for ((where, addresses) in places) {
             val (machine, place) = where
             // Only folders the core reported, on machines that are up.
             if (!place.startsWith("/") || (machine.isNotBlank() && m.linked.find { it.name == machine }?.connected != true)) continue
             val key = Sidebar.gitKey(machine, place); val full = "$id|$key"
             // A terminal that stops working may have committed or switched branch.
-            if (spaces.any { s -> s.tabs.any { t -> t.terminals.any { it in stopped } } }) gitDirty += full
+            if (addresses.any { it in stopped }) gitDirty += full
             val now = System.currentTimeMillis()
             val last = gitChecked[full]
             val dirty = gitDirty.remove(full)
             val known = state.value.machines[id]?.git?.containsKey(key) == true
             val repo = state.value.machines[id]?.git?.get(key) != null
-            if (!(last == null || dirty || (drawerOpen && (repo || !known) && now - last > 60_000))) continue
+            if (!(last == null || dirty || (gitShown && (repo || !known) && now - last > 60_000))) continue
             gitChecked[full] = now
             runCatching { gitCheck(client, machine, place) }
                 .onSuccess { info -> updateMachine(id) { it.copy(git = it.git + (key to info)) } }
@@ -508,7 +530,10 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         if (status.first != 0) { if ("not a git repository" in status.third) return null; error(status.third.ifBlank { "git failed" }) }
         val rev = git(client, machine, place, GitInfo.REV_PARSE)
         if (rev.first != 0) error(rev.third.ifBlank { "git rev-parse failed" })
-        return GitInfo.parse(status.second, rev.second, place) ?: error("unreadable git answer")
+        // Exit 1 is no origin: a repository all the same, named by its own folder.
+        val remote = git(client, machine, place, GitInfo.REMOTE)
+        if (remote.first != 0 && remote.first != 1) error(remote.third.ifBlank { "git config failed" })
+        return GitInfo.parse(status.second, rev.second, place, if (remote.first == 0) remote.second else "") ?: error("unreadable git answer")
     }
     private suspend fun git(client: CoreClient, machine: String, cwd: String, args: List<String>): Triple<Int, String, String> {
         val params = JSONObject().put("argv", JSONArray(listOf("git", "--no-optional-locks") + args)).put("cwd", cwd)
@@ -733,16 +758,24 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         clients.keys.toList().forEach { disconnect(it) }
         val id = "preview"
         val terminals = listOf(
-            CoreTerminal("t1", "Authentication flow", "~/work/herdr", "live", "blocked", "Claude Code", "Waiting for your approval to run the test suite", 80, 24),
+            CoreTerminal("t1", "Authentication flow", "~/work/herdr-auth", "live", "blocked", "Claude Code", "Waiting for your approval to run the test suite", 80, 24),
             CoreTerminal("t2", "Android companion", "~/work/herdr", "live", "working", "Codex", "Building the mobile navigation", 80, 24),
-            CoreTerminal("t3", "API review", "~/work/herdr", "live", "done", "Claude Code", "Reviewed 12 files · ready when you are", 80, 24),
-            CoreTerminal("t4", "Shell", "~/work/website", "live", "", "zsh", "", 80, 24))
-        val spaces = listOf(PocketSpace("sp1", "herdr", "~/work/herdr", "", listOf(PocketTab("tb1", "Authentication", listOf("t1")), PocketTab("tb2", "Android", listOf("t2", "t3")))),
-            PocketSpace("sp2", "Website", "~/work/website", "", listOf(PocketTab("tb3", "Shell", listOf("t4")))))
-        _state.update { it.copy(demo = true, screen = "overview", selected = null, space = null,
-            machines = mapOf(id to MachineState(connected = true, version = "preview", terminals = terminals, spaces = spaces))) }
+            CoreTerminal("t3", "API review", "~/work/herdr-api", "live", "done", "Claude Code", "Reviewed 12 files · ready when you are", 80, 24),
+            CoreTerminal("t4", "Shell", "~/work/website", "live", "", "zsh", "", 80, 24),
+            CoreTerminal("t5", "Release notes", "~/work/herdr-squad", "live", "working", "Codex", "Drafting the changelog", 80, 24),
+            CoreTerminal("t6", "Landing copy", "~/work/website", "live", "idle", "Claude Code", "", 80, 24))
+        val spaces = listOf(PocketSpace("sp1", "herdr", "~/work/herdr", "", listOf(PocketTab("tb2", "Android", listOf("t2", "t3")), PocketTab("tb1", "Authentication", listOf("t1")))),
+            PocketSpace("sp3", "Release squad", "~/work/herdr-squad", "", listOf(PocketTab("tb4", "Notes", listOf("t5")))),
+            PocketSpace("sp2", "Website", "~/work/website", "", listOf(PocketTab("tb3", "Shell", listOf("t4")), PocketTab("tb5", "Copy", listOf("t6")))))
+        // Sample repositories: one with a squad's worktrees (its branches are tasks), one on main (untasked).
+        fun repo(top: String, branch: String, common: String = "~/work/herdr/.git", remote: String = "example/herdr") =
+            Sidebar.gitKey("", top) to GitInfo(branch, 0, 0, top, common, remote)
+        val git = mapOf(repo("~/work/herdr", "dev"), repo("~/work/herdr-auth", "feat/auth-flow"), repo("~/work/herdr-api", "fix/api-review"),
+            repo("~/work/herdr-squad", "feat/release-notes"), repo("~/work/website", "main", "~/work/website/.git", "example/website"))
+        _state.update { it.copy(demo = true, screen = Nav.TODAY, selected = null, space = null, project = null,
+            machines = mapOf(id to MachineState(connected = true, version = "preview", terminals = terminals, spaces = spaces, git = git))) }
     }
-    fun leaveDemo() { detach(); _state.update { it.copy(demo = false, machines = emptyMap(), selected = null, space = null) } }
+    fun leaveDemo() { detach(); _state.update { it.copy(demo = false, machines = emptyMap(), selected = null, space = null, project = null) } }
     fun hostName(hostId: String) = if (state.value.demo) "Preview machine" else state.value.hosts.find { it.id == hostId }?.name ?: "Machine"
     override fun onCleared() { if (current === this) current = null; discovery.stop(); clients.values.forEach { it.close() }; clients.clear() }
 }
