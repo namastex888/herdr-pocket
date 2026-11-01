@@ -152,8 +152,9 @@ stops opening it, for example after reinstalling, set the assistant again.
   Connections don't come back on their own after an update: open the app to reconnect.
 - When Android won't install silently, a notification says **Automagik X is ready**, once per
   version. Tap **Install** to open Settings and Android's confirm prompt. This happens on Android
-  11 and older, on a phone plan, with the switch off, until Automagik may install apps, and when
-  Android asks to confirm (for example the first update after installing from a browser).
+  11 and older, on a phone plan, with the switch off, until Automagik may install apps (the first
+  tap asks), and when Android asks to confirm (for example when another app store owns the app's
+  updates).
 
 ## Limits in detail
 

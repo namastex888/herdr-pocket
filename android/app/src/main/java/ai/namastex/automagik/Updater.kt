@@ -104,6 +104,8 @@ object Updater {
     val updated = _updated.asStateFlow()
     private var job: Job? = null
     private var waiter: Job? = null
+    /** The session the updater committed last: an abandoned older one still reports (aborted), and is ignored. */
+    @Volatile private var session = -1
     // The Application, which lives as long as the process: no screen leaks through it.
     @Volatile private var app: Application? = null
     @Volatile private var lastInput = 0L
@@ -312,16 +314,17 @@ object Updater {
             // STATUS_PENDING_USER_ACTION and the person confirms.
             if (Build.VERSION.SDK_INT >= UpdatePolicy.SILENT_SDK) setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
         }
-        val id = installer.createSession(params)
+        val id = installer.createSession(params).also { session = it }
         installer.openSession(id).use { session ->
             session.openWrite("automagik.apk", 0, apk.length()).use { out -> apk.inputStream().use { it.copyTo(out) }; session.fsync(out) }
-            val callback = Intent(context, UpdateReceiver::class.java)
+            val callback = Intent(context, UpdateReceiver::class.java).putExtra(PackageInstaller.EXTRA_SESSION_ID, id)
             val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
             session.commit(PendingIntent.getBroadcast(context, id, callback, flags).intentSender)
         }
     }
 
-    internal fun reported(status: Int, message: String?, confirm: Intent?) {
+    internal fun reported(id: Int, status: Int, message: String?, confirm: Intent?) {
+        if (id != session) return
         val (release, manual) = when (val s = _state.value) {
             is UpdateState.Installing -> s.release to s.manual; is UpdateState.Confirm -> s.release to true; else -> null
         } ?: return
@@ -398,7 +401,7 @@ object Updater {
 /** Android's installer reports here: asks the person to confirm, or says how it went. */
 class UpdateReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        Updater.reported(intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE),
+        Updater.reported(intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1), intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE),
             intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE), IntentCompat.getParcelableExtra(intent, Intent.EXTRA_INTENT, Intent::class.java))
     }
 }

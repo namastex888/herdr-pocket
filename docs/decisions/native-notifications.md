@@ -16,8 +16,9 @@ There is no in-app toast.
 
 - Owner, 2026-11-01: no in-app toast at the bottom of the screen; native Android notifications
   instead (PR #17, which opens with "Owner asked").
-- This supersedes the in-app sound-and-toast with **Open** from #10 for agent alerts. Update and
-  crash notices still use the in-app snackbar.
+- This supersedes the in-app sound-and-toast with **Open** from #10 for agent alerts. Crash notices
+  still use the in-app snackbar; update notices became notifications too
+  ([updates install silently](updates-install-silently.md)).
 
 ## Current state
 
