@@ -2,8 +2,7 @@ name: Android
 
 on:
   push:
-    branches: [main]
-    tags: ['v*']
+    branches: [dev]
   pull_request:
   workflow_dispatch:
 
@@ -40,7 +39,7 @@ jobs:
       - name: Name APK
         id: apk
         run: |
-          version=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts)
+          version=$(scripts/version.sh current)
           name="automagik-${version}-${GITHUB_SHA::7}-debug.apk"
           cp app/build/outputs/apk/debug/app-debug.apk "$name"
           echo "name=$name" >> "$GITHUB_OUTPUT"
@@ -75,64 +74,3 @@ jobs:
           python -m playwright install --with-deps chromium
       - run: python scripts/test_terminal.py
 
-  # Every push to main publishes a release-signed build; installed copies offer it from Settings → About.
-  release:
-    name: Publish update
-    needs: [build, terminal]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: write
-    concurrency:
-      group: release
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - uses: android-actions/setup-android@v3
-        with:
-          packages: 'platforms;android-35 build-tools;35.0.0'
-
-      - uses: gradle/actions/setup-gradle@v4
-
-      - name: Build release APK
-        id: build
-        env:
-          KEYSTORE: ${{ secrets.POCKET_SIGNING_KEYSTORE }}
-          POCKET_SIGNING_PASSWORD: ${{ secrets.POCKET_SIGNING_PASSWORD }}
-        run: |
-          if [ -z "$KEYSTORE" ] || [ -z "$POCKET_SIGNING_PASSWORD" ]; then
-            echo "::notice::No release key in this repository's secrets; skipping the update."
-            echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          export POCKET_SIGNING_STORE="$RUNNER_TEMP/pocket.jks"
-          echo "$KEYSTORE" | base64 -d > "$POCKET_SIGNING_STORE"
-          ./gradlew --stacktrace :app:assembleRelease
-          rm -f "$POCKET_SIGNING_STORE"
-
-      - name: Publish release
-        if: steps.build.outputs.skip != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          meta=app/build/outputs/apk/release/output-metadata.json
-          code=$(jq -r '.elements[0].versionCode' "$meta")
-          name=$(jq -r '.elements[0].versionName' "$meta")
-          tag="build-$code"
-          if gh release view "$tag" >/dev/null 2>&1; then echo "::notice::$tag is already published."; exit 0; fi
-          cp app/build/outputs/apk/release/app-release.apk automagik.apk
-          sha=$(sha256sum automagik.apk | cut -d' ' -f1)
-          # A merge commit's subject is "Merge pull request #N…"; its body is the pull request's title.
-          notes=$(git log -1 --format=%b | head -c 500)
-          [ -n "$notes" ] || notes=$(git log -1 --format=%s | head -c 500)
-          jq -n --argjson code "$code" --arg name "$name" --arg sha "$sha" --arg notes "$notes" \
-            --arg url "https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/automagik.apk" \
-            '{versionCode: $code, versionName: $name, url: $url, sha256: $sha, notes: $notes}' > latest.json
-          gh release create "$tag" automagik.apk latest.json --target "$GITHUB_SHA" --latest \
-            --title "$name ($code)" --notes "$notes"$'\n\n'"SHA-256: \`$sha\`"

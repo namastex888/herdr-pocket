@@ -15,10 +15,13 @@ val signing = Properties().apply {
 // build always takes the updates published after it. CI and local builds of one commit get the same number.
 val commitMinutes = providers.exec { commandLine("git", "log", "-1", "--format=%ct"); isIgnoreExitValue = true }
     .standardOutput.asText.map { ((it.trim().toLongOrNull() ?: 1735689660L) - 1735689600L) / 60 }
+// The release version (0.N.0), set by the release workflow on dev: scripts/version.sh, version.properties.
+val appVersion: String = Properties().apply { rootProject.file("version.properties").inputStream().use(::load) }.getProperty("version")
+
 android {
     namespace = "ai.namastex.automagik"
     compileSdk = 35
-    defaultConfig { applicationId = "ai.namastex.automagik"; minSdk = 26; targetSdk = 35; versionCode = commitMinutes.get().toInt(); versionName = "0.3.0"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    defaultConfig { applicationId = "ai.namastex.automagik"; minSdk = 26; targetSdk = 35; versionCode = commitMinutes.get().toInt(); versionName = appVersion; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // iroh ships a 9–14 MB library per ABI: phones, and x86_64 for Intel emulators. 32-bit x86 and MIPS phones are long gone.
         ndk { abiFilters += setOf("arm64-v8a", "armeabi-v7a", "x86_64") }
         // Where installed copies look for updates: latest.json on the newest GitHub release. A fork points this at its own.
