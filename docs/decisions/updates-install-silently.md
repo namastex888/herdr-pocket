@@ -43,7 +43,7 @@ Android notifications replace the in-app "update available" bar.
   preferences (`watched_hosts`,
   `android/app/src/main/java/ai/namastex/automagik/PocketViewModel.kt:367`).
   A machine connected with a typed password isn't kept, because the password isn't.
-- `WatchResumeReceiver` (`WatchResume.kt:37`, manifest `AndroidManifest.xml:37`) wakes on
+- `WatchResumeReceiver` (`WatchResume.kt:46`, manifest `AndroidManifest.xml:42`) wakes on
   `MY_PACKAGE_REPLACED`, so it runs for any update source, GitHub or Play. It lives in `src/main`,
   apart from the updater. It starts the watch service and reconnects those machines
   (`PocketViewModel.kt:380`). The decision is unit tested in `WatchResumeTest.kt`.
@@ -55,14 +55,15 @@ Android notifications replace the in-app "update available" bar.
   ([Android 15 changes](https://developer.android.com/about/versions/15/behavior-changes-15#fgs-boot-completed)).
 - No new permission. "Updated to X" no longer says "Open Automagik to reconnect" when the watch
   comes back on its own (`Updater.kt:392`).
-- Not covered: a reboot. Restarting after `BOOT_COMPLETED` would reuse the same path, but needs
-  the `RECEIVE_BOOT_COMPLETED` permission, which needs an RFC first.
+- After a phone restart, the same receiver also wakes on `BOOT_COMPLETED`, after the first unlock,
+  with the same rules. It needs `RECEIVE_BOOT_COMPLETED`, a normal permission:
+  [RFC 0007](../rfcs/0007-watch-after-reboot.md).
 
 ## Open questions
 
 1. Should the switch also allow downloads on a metered network? — the owner.
-2. Should Watch in background also come back after the phone restarts (`BOOT_COMPLETED`, a new
-   permission)? — the owner.
+2. ~~Should Watch in background also come back after the phone restarts?~~ Resolved: yes, owner
+   2026-11-01, [RFC 0007](../rfcs/0007-watch-after-reboot.md).
 
 ## Related
 
