@@ -344,18 +344,18 @@ fn omp_reported_usd_is_kept_and_wins_over_the_table() {
     let r = env.run(&env.opts());
     assert_eq!(r.health.events, 2);
     let doc = r.summary.unwrap();
-    let total = doc["totals"]
+    let model = doc["models"]
         .as_array()
         .unwrap()
         .iter()
         .find(|t| t["harness"] == "omp")
         .unwrap()
         .clone();
-    assert_eq!(total["usd"], 0.75);
-    assert_eq!(total["usd_src"], "reported");
-    let row = &doc["hourly"][0];
-    assert_eq!(row["usd_src"], "reported");
-    assert!(row.get("branch").is_none(), "omp records no branch");
+    assert_eq!(model["d30"]["usd"], 0.75);
+    assert_eq!(model["d30"]["usd_rep"], 0.75);
+    // omp records no branch: its work is the project's untasked bucket, not a task.
+    assert_eq!(doc["projects"][0]["untasked"]["usd_rep"], 0.75);
+    assert_eq!(doc["tasks"].as_array().unwrap().len(), 0);
     let rows = env.store().rows_since(i64::MIN).unwrap();
     assert_eq!(rows[0].reported_usd, Some(0.75));
 }
@@ -372,15 +372,21 @@ fn unknown_models_are_unpriced_never_zero() {
         ],
     );
     let doc = env.run(&env.opts()).summary.unwrap();
-    for t in doc["totals"].as_array().unwrap() {
+    for t in doc["models"].as_array().unwrap() {
         if t["model"] == "model-nobody-prices" {
             assert_eq!(t["priced"], false);
-            assert!(t.get("usd").is_none());
+            assert!(t["d30"].get("usd").is_none());
+            assert_eq!(t["d30"]["unpriced"], U1.tokens().total());
         } else {
-            assert!(t["usd"].as_f64().unwrap() > 0.0);
+            assert!(t["d30"]["usd"].as_f64().unwrap() > 0.0);
             assert!(t.get("priced").is_none());
+            assert!(t["d30"].get("unpriced").is_none());
         }
     }
+    // The project mixes both: $ of the priced half, and the rest counted as unpriced.
+    let p = &doc["projects"][0]["d30"];
+    assert!(p["usd"].as_f64().unwrap() > 0.0);
+    assert_eq!(p["unpriced"], U1.tokens().total());
     assert_eq!(
         doc["sources"]["claude-code"]["unknown_models"][0],
         "model-nobody-prices"
@@ -504,7 +510,7 @@ fn single_flight_and_staleness() {
 }
 
 #[test]
-fn the_first_run_imports_14_days_and_backfill_imports_the_rest() {
+fn the_first_run_imports_30_days_and_backfill_imports_the_rest() {
     let env = Env::new();
     let f = env.claude("-work-app/sess-1.jsonl");
     write_lines(
@@ -522,14 +528,50 @@ fn the_first_run_imports_14_days_and_backfill_imports_the_rest() {
         ],
     );
     let r = env.run(&env.opts());
-    assert_eq!(meter::time::format_day(r.counted_from_ms), "2026-01-02");
+    assert_eq!(meter::time::format_day(r.counted_from_ms), "2025-12-17");
     assert_eq!(env.totals()["model-a"], U1.tokens());
-    assert_eq!(r.summary.unwrap()["counted_from"], "2026-01-02T00:00:00Z");
+    assert_eq!(r.summary.unwrap()["counted_from"], "2025-12-17T00:00:00Z");
     let mut o = env.opts();
     o.backfill = true;
     let r = env.run(&o);
     assert!(r.reimported);
     assert_eq!(r.counted_from_ms, 0);
+    assert_eq!(env.totals()["model-a"], sum(&[&U1, &U2]));
+}
+
+#[test]
+fn a_store_with_a_shorter_window_widens_once_on_a_plain_sync() {
+    let env = Env::new();
+    let f = env.claude("-work-app/sess-1.jsonl");
+    write_lines(
+        &f,
+        &[
+            claude_line(
+                "msg_old",
+                "req_old",
+                "2025-12-20T10:00:00Z",
+                "model-a",
+                &U2,
+                0,
+            ),
+            claude_line("msg_new", "req_new", TS, "model-a", &U1, 0),
+        ],
+    );
+    // A store filled with a 14-day window, as an older meter did.
+    let mut o = env.opts();
+    o.days = Some(14);
+    env.run(&o);
+    assert_eq!(env.totals()["model-a"], U1.tokens());
+    // The installed trigger runs a plain sync: the store widens to the default window.
+    let r = env.run(&env.opts());
+    assert!(r.reimported);
+    assert_eq!(meter::time::format_day(r.counted_from_ms), "2025-12-17");
+    assert_eq!(env.totals()["model-a"], sum(&[&U1, &U2]));
+    // ... once: a day later, the window has moved on but the store keeps what it has.
+    let mut o = env.opts();
+    o.now_ms += meter::time::DAY_MS;
+    let r = env.run(&o);
+    assert!(!r.reimported);
     assert_eq!(env.totals()["model-a"], sum(&[&U1, &U2]));
 }
 

@@ -5,15 +5,16 @@ use std::io;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use crate::event::{Actor, RollupKey, UsageEvent};
+use crate::event::{Actor, Precision, RollupKey, Tokens, UsageEvent};
 use crate::hc::{Hc, LiveTerminal};
 use crate::paths;
 use crate::prices::PriceTable;
-use crate::scan::{self, Candidate, Plan, ReadLimits};
+use crate::scan::{self, Candidate, Plan, ReadLimits, ReadOutcome};
 use crate::sources::Source;
+use crate::sources::codex::{self, State};
 use crate::store::{Attributed, FileState, Health, SEEN_CAP, Store};
 use crate::summary::{self, SourceHealth};
-use crate::time::{DAY_MS, day_start};
+use crate::time::{DAY_MS, HOUR_MS, day_start};
 
 /// Phase timings on stderr when `METER_TRACE` is set. Durations only, never content.
 struct Trace {
@@ -41,11 +42,17 @@ impl Trace {
     }
 }
 
-pub const DEFAULT_DAYS: i64 = 14;
+pub const DEFAULT_DAYS: i64 = 30;
 pub const DEFAULT_BUDGET: Duration = Duration::from_secs(20);
 pub const DEFAULT_STALE_MS: i64 = 10 * 60 * 1000;
 pub const DEFAULT_DOC: &str = "herdr-meter";
 const REPO_RECHECK_MS: i64 = 7 * DAY_MS;
+/// Threads are re-listed from a little before the last run's newest `updated_at_ms`, in case
+/// Codex stamped a thread before it finished writing the rollout.
+const CODEX_SLACK_MS: i64 = 10 * 60 * 1000;
+/// A rollout with no running total is counted from `tokens_used` only once its thread has been
+/// idle this long (a new thread writes its first total after its first reply).
+const CODEX_IDLE_MS: i64 = HOUR_MS;
 
 #[derive(Debug, Clone)]
 pub struct Options {
@@ -53,6 +60,8 @@ pub struct Options {
     pub omp_root: PathBuf,
     /// `~/.claude/projects` (or `$CLAUDE_CONFIG_DIR/projects`).
     pub claude_root: PathBuf,
+    /// `~/.codex` (or `$CODEX_HOME`).
+    pub codex_home: PathBuf,
     pub state_dir: PathBuf,
     /// Window for the first import, and for a widening re-import.
     pub days: Option<i64>,
@@ -82,9 +91,14 @@ impl Options {
             .map(PathBuf::from)
             .unwrap_or_else(|| home.join(".claude"))
             .join("projects");
+        let codex_home = std::env::var_os("CODEX_HOME")
+            .filter(|d| !d.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join(".codex"));
         Options {
             omp_root: home.join(".omp/agent/sessions"),
             claude_root,
+            codex_home,
             state_dir,
             days: None,
             backfill: false,
@@ -215,7 +229,10 @@ impl Attributor {
             if e.ts_ms < from_ms {
                 continue;
             }
-            let repo = self.repo(store, e.cwd.as_deref())?;
+            let repo = match &e.repo {
+                Some(r) => Some(r.clone()),
+                None => self.repo(store, e.cwd.as_deref())?,
+            };
             let actor = self.actor(&e);
             out.push(Attributed {
                 key: RollupKey {
@@ -290,18 +307,27 @@ pub fn source_health(store: &Store) -> rusqlite::Result<Vec<SourceHealth>> {
                 duplicates: h.duplicates,
                 skipped_lines: h.skipped_lines,
                 rewrites: h.rewrites,
+                ..Default::default()
             },
         );
     }
-    Ok(Source::ALL
-        .iter()
-        .map(|s| {
-            by.remove(s.harness()).unwrap_or(SourceHealth {
-                harness: s.harness().into(),
-                ..Default::default()
-            })
-        })
-        .collect())
+    let mut out = Vec::new();
+    for s in Source::ALL {
+        let mut h = by.remove(s.harness()).unwrap_or(SourceHealth {
+            harness: s.harness().into(),
+            ..Default::default()
+        });
+        h.status = "ok".into();
+        if s == Source::Codex {
+            if let Some(st) = store.meta("codex_status")? {
+                h.status = st;
+            }
+            h.reason = store.meta("codex_reason")?.filter(|r| !r.is_empty());
+            h.threads = Some(store.codex_thread_counts()?);
+        }
+        out.push(h);
+    }
+    Ok(out)
 }
 
 pub fn run(opts: &Options) -> Result<Outcome, Error> {
@@ -329,25 +355,26 @@ pub fn run(opts: &Options) -> Result<Outcome, Error> {
 
     // The import window. Widening it (or --backfill) re-imports: rows are a projection.
     let stored = store.meta_i64("counted_from_ms")?;
+    // A store that holds less than the default window (one filled when the default was 14 days)
+    // widens once on its own: the installed trigger runs a plain `sync`.
     let wanted = if opts.backfill {
-        Some(0)
+        0
     } else {
-        opts.days
-            .map(|d| day_start(now - d.max(1) * DAY_MS + DAY_MS))
+        let days = opts.days.unwrap_or(DEFAULT_DAYS).max(1);
+        day_start(now - days * DAY_MS + DAY_MS)
     };
     let mut reimported = false;
-    let counted_from = match (stored, wanted) {
-        (None, w) => {
-            let from = w.unwrap_or_else(|| day_start(now - DEFAULT_DAYS * DAY_MS + DAY_MS));
-            store.reset(from)?;
-            from
+    let counted_from = match stored {
+        None => {
+            store.reset(wanted)?;
+            wanted
         }
-        (Some(s), Some(w)) if w < s => {
-            store.reset(w)?;
+        Some(s) if wanted < s => {
+            store.reset(wanted)?;
             reimported = true;
-            w
+            wanted
         }
-        (Some(s), _) => s,
+        Some(s) => s,
     };
 
     if !opts.force && !reimported {
@@ -379,6 +406,31 @@ pub fn run(opts: &Options) -> Result<Outcome, Error> {
     };
 
     trace.mark("hc");
+    let mut report = Report {
+        counted_from_ms: counted_from,
+        reimported,
+        machine,
+        ..Report::default()
+    };
+    let mut pending_sources: BTreeSet<Source> = BTreeSet::new();
+    // Codex first, with at most half the budget: once imported, a run reads a few small tails.
+    let codex_limits = ReadLimits {
+        chunk_bytes: opts.chunk_bytes,
+        max_line: opts.max_line,
+        deadline: started + opts.budget / 2,
+        chunks_left: opts.chunk_limit.map(std::cell::Cell::new),
+    };
+    let codex_read = codex_pass(
+        opts,
+        &mut store,
+        &mut attr,
+        counted_from,
+        &codex_limits,
+        &mut report,
+        &mut pending_sources,
+    )?;
+    trace.mark("codex");
+
     let mut candidates: Vec<Candidate> = Vec::new();
     scan::discover(&opts.omp_root, Source::Omp, &mut candidates);
     scan::discover(&opts.claude_root, Source::Claude, &mut candidates);
@@ -389,20 +441,13 @@ pub fn run(opts: &Options) -> Result<Outcome, Error> {
             .then_with(|| a.path.cmp(&b.path))
     });
 
-    let mut report = Report {
-        files_seen: candidates.len(),
-        counted_from_ms: counted_from,
-        reimported,
-        machine,
-        ..Report::default()
-    };
+    report.files_seen += candidates.len();
     let limits = ReadLimits {
         chunk_bytes: opts.chunk_bytes,
         max_line: opts.max_line,
         deadline,
         chunks_left: opts.chunk_limit.map(std::cell::Cell::new),
     };
-    let mut pending_sources: BTreeSet<Source> = BTreeSet::new();
     let mut stopped_at = candidates.len();
 
     trace.mark("discover");
@@ -427,41 +472,19 @@ pub fn run(opts: &Options) -> Result<Outcome, Error> {
             Plan::Unchanged => continue,
             Plan::Read { state, rewritten } => (*state, rewritten),
         };
-        let mut first = true;
-        let res = scan::read_file(
+        let res = read_into_store(
+            &mut store,
+            &mut attr,
             &mut state,
             c.source,
+            rewritten,
             &limits,
-            |st: &FileState, events, mut health| {
-                if first && rewritten {
-                    health.rewrites += 1;
-                }
-                first = false;
-                let attributed = attr
-                    .attribute(&store, events, counted_from)
-                    .map_err(io::Error::other)?;
-                let applied = store
-                    .apply_chunk(st, &attributed, health, now)
-                    .map_err(io::Error::other)?;
-                report.health.add(&applied);
-                Ok(())
-            },
+            counted_from,
+            now,
+            &mut report,
         );
         match res {
             Ok(outcome) => {
-                report.files_read += 1;
-                report.bytes_read += outcome.bytes;
-                if rewritten && first {
-                    // Nothing was read (an emptied file): still count the rewrite.
-                    let h = Health {
-                        rewrites: 1,
-                        ..Health::default()
-                    };
-                    store.apply_chunk(&state, &[], h, now)?;
-                    report.health.add(&h);
-                } else {
-                    store.put_file(&state)?;
-                }
                 if outcome.stopped {
                     report.stopped_by_budget = true;
                     report.pending_bytes += c.size.saturating_sub(state.offset);
@@ -503,7 +526,7 @@ pub fn run(opts: &Options) -> Result<Outcome, Error> {
     store.set_meta("last_pending_bytes", &report.pending_bytes.to_string())?;
     store.set_meta("last_pending_files", &report.pending_files.to_string())?;
     for s in Source::ALL {
-        if !pending_sources.contains(&s) {
+        if !pending_sources.contains(&s) && (s != Source::Codex || codex_read) {
             store.mark_success(s.harness(), now)?;
         }
     }
@@ -540,4 +563,233 @@ pub fn run(opts: &Options) -> Result<Outcome, Error> {
     report.summary = Some(doc);
     report.elapsed = started.elapsed();
     Ok(Outcome::Ran(Box::new(report)))
+}
+
+/// Reads one file from its saved state, committing each chunk (rows, offset and, for Codex, the
+/// thread's running total) in one transaction, then records the file's final state.
+#[allow(clippy::too_many_arguments)]
+fn read_into_store(
+    store: &mut Store,
+    attr: &mut Attributor,
+    state: &mut FileState,
+    source: Source,
+    rewritten: bool,
+    limits: &ReadLimits,
+    counted_from: i64,
+    now: i64,
+    report: &mut Report,
+) -> io::Result<ReadOutcome> {
+    let mut first = true;
+    let outcome = scan::read_file(
+        state,
+        source,
+        limits,
+        |st: &FileState, events, mut health| {
+            if first && rewritten {
+                health.rewrites += 1;
+            }
+            first = false;
+            let attributed = attr
+                .attribute(store, events, counted_from)
+                .map_err(io::Error::other)?;
+            let applied = store
+                .apply_chunk(st, &attributed, health, now)
+                .map_err(io::Error::other)?;
+            report.health.add(&applied);
+            Ok(())
+        },
+    )?;
+    report.files_read += 1;
+    report.bytes_read += outcome.bytes;
+    if rewritten && first {
+        // Nothing was read (an emptied file): still count the rewrite.
+        let h = Health {
+            rewrites: 1,
+            ..Health::default()
+        };
+        store
+            .apply_chunk(state, &[], h, now)
+            .map_err(io::Error::other)?;
+        report.health.add(&h);
+    } else {
+        store.put_file(state).map_err(io::Error::other)?;
+    }
+    Ok(outcome)
+}
+
+fn set_codex_status(store: &Store, status: &str, reason: &str) -> rusqlite::Result<()> {
+    store.set_meta("codex_status", status)?;
+    store.set_meta("codex_reason", reason)
+}
+
+/// Codex threads changed since the last run: each rollout from where the last run stopped (its
+/// tail, once imported), else the thread's `tokens_used` as `total_only`. Returns whether the
+/// thread list could be read.
+fn codex_pass(
+    opts: &Options,
+    store: &mut Store,
+    attr: &mut Attributor,
+    counted_from: i64,
+    limits: &ReadLimits,
+    report: &mut Report,
+    pending: &mut BTreeSet<Source>,
+) -> Result<bool, Error> {
+    let now = opts.now_ms;
+    let Some(db) = codex::state_db(&opts.codex_home) else {
+        set_codex_status(store, "absent", "")?;
+        return Ok(false);
+    };
+    let watermark = store.meta_i64("codex_watermark_ms")?;
+    let since = watermark.map_or(counted_from, |w| (w - CODEX_SLACK_MS).max(counted_from));
+    let (threads, parents) = match codex::read_state(&db, since) {
+        State::Threads { threads, parents } => (threads, parents),
+        State::Absent => {
+            set_codex_status(store, "absent", "")?;
+            return Ok(false);
+        }
+        State::Unsupported(reason) => {
+            set_codex_status(store, "unsupported", &reason)?;
+            return Ok(false);
+        }
+        State::Unreadable(reason) => {
+            // Try again next run; what was counted stays.
+            set_codex_status(store, "degraded", &reason)?;
+            return Ok(false);
+        }
+    };
+    report.files_seen += threads.len();
+    let mut mark = watermark.unwrap_or(counted_from);
+    let mut blocked = false;
+    let (mut bad, mut unreadable, mut cache_writes, mut decreases) = (0i64, 0i64, 0i64, 0i64);
+    for t in &threads {
+        let rollout = codex::resolve_rollout(&opts.codex_home, t.rollout_path.as_deref());
+        let c = rollout.as_deref().and_then(scan::candidate_of);
+        if blocked || limits.exhausted() {
+            blocked = true;
+            report.stopped_by_budget = true;
+            if let Some(c) = &c {
+                let offset = store
+                    .file(&c.path.to_string_lossy())?
+                    .map_or(0, |f| f.offset);
+                report.pending_bytes += c.size.saturating_sub(offset);
+            }
+            report.pending_files += 1;
+            pending.insert(Source::Codex);
+            continue;
+        }
+        let (old_path, cum, counted) = store.codex_thread(&t.id)?.unwrap_or_default();
+        let mut ctx = t.ctx(parents.get(&t.id), cum, counted);
+        // `complete`: everything the rollout holds is folded into `ctx`.
+        let mut complete = rollout.is_none();
+        match &c {
+            None if rollout.is_some() => unreadable += 1,
+            None => {}
+            Some(c) => {
+                let key = c.path.to_string_lossy().into_owned();
+                let mut prev = store.file(&key)?;
+                if prev.is_none()
+                    && let Some(op) = old_path.as_deref().filter(|op| *op != key)
+                    && let Some(mut o) = store.file(op)?
+                    && o.dev == c.dev
+                    && o.ino == c.ino
+                {
+                    // Moved (archived) in place: carry the offset over instead of reading again.
+                    o.path = key.clone();
+                    prev = Some(o);
+                }
+                match scan::plan(c, prev) {
+                    Err(_) => unreadable += 1,
+                    Ok(Plan::Unchanged) => complete = true,
+                    Ok(Plan::Read { state, rewritten }) => {
+                        let mut state = *state;
+                        // The running total belongs to the thread, so a rollout read again from
+                        // the start (rewritten or copied elsewhere) counts nothing twice.
+                        state.ctx.codex = Some(ctx.clone());
+                        match read_into_store(
+                            store,
+                            attr,
+                            &mut state,
+                            Source::Codex,
+                            rewritten,
+                            limits,
+                            counted_from,
+                            now,
+                            report,
+                        ) {
+                            Ok(outcome) => {
+                                if let Some(cx) = state.ctx.codex.take() {
+                                    ctx = cx;
+                                }
+                                if outcome.stopped {
+                                    blocked = true;
+                                    report.stopped_by_budget = true;
+                                    report.pending_bytes += c.size.saturating_sub(state.offset);
+                                    report.pending_files += 1;
+                                    pending.insert(Source::Codex);
+                                } else {
+                                    complete = true;
+                                }
+                            }
+                            Err(_) => unreadable += 1,
+                        }
+                    }
+                }
+            }
+        }
+        bad += ctx.bad;
+        cache_writes += ctx.cache_writes;
+        decreases += ctx.decreases;
+        let no_split = rollout.is_none()
+            || ctx.bad > 0
+            || (ctx.cum.total == 0 && now - t.updated_at_ms > CODEX_IDLE_MS);
+        if complete && no_split && t.tokens_used > ctx.counted {
+            let tokens = Tokens {
+                unsplit: t.tokens_used - ctx.counted,
+                ..Tokens::default()
+            };
+            ctx.counted = t.tokens_used;
+            let e = codex::event(&ctx, t.updated_at_ms, tokens, Precision::TotalOnly);
+            let attributed = attr.attribute(store, vec![e], counted_from)?;
+            let h = Health {
+                usage_lines: 1,
+                ..Health::default()
+            };
+            let applied = store.apply_codex(&ctx, &attributed, h, now)?;
+            report.health.add(&applied);
+        }
+        if !blocked {
+            mark = mark.max(t.updated_at_ms);
+        }
+    }
+    if Some(mark) != watermark {
+        store.set_meta("codex_watermark_ms", &mark.to_string())?;
+    }
+    let total_bad = store.meta_i64("codex_bad_lines")?.unwrap_or(0) + bad;
+    store.set_meta("codex_bad_lines", &total_bad.to_string())?;
+    let mut reasons = Vec::new();
+    if total_bad > 0 {
+        reasons.push(format!(
+            "{total_bad} token_count lines in an unknown format; their threads count as total_only"
+        ));
+    }
+    if unreadable > 0 {
+        reasons.push(format!("{unreadable} rollouts could not be read"));
+    }
+    if decreases > 0 {
+        reasons.push(format!(
+            "{decreases} running totals went down; counted as 0"
+        ));
+    }
+    let degraded = !reasons.is_empty();
+    if cache_writes > 0 {
+        reasons.push(format!(
+            "{cache_writes} lines have cache_write_input_tokens, counted as uncached input"
+        ));
+    }
+    set_codex_status(
+        store,
+        if degraded { "degraded" } else { "ok" },
+        &reasons.join("; "),
+    )?;
+    Ok(true)
 }

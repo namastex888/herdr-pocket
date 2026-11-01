@@ -198,6 +198,7 @@ pub fn harness_of(program: &str) -> Option<&'static str> {
     match base {
         "claude" | "claude-code" => Some("claude-code"),
         "omp" => Some("omp"),
+        "codex" => Some("codex"),
         _ => None,
     }
 }

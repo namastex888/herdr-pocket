@@ -12,6 +12,8 @@ pub struct Tokens {
     pub cache_write_1h: i64,
     pub output: i64,
     pub reasoning: i64,
+    /// Tokens known only as a total, with no split (`precision: total_only`). Never priced.
+    pub unsplit: i64,
 }
 
 impl Tokens {
@@ -22,10 +24,16 @@ impl Tokens {
         self.cache_write_1h += o.cache_write_1h;
         self.output += o.output;
         self.reasoning += o.reasoning;
+        self.unsplit += o.unsplit;
     }
 
-    /// Billable tokens: everything except `reasoning`, which `output` already contains.
+    /// All tokens: everything except `reasoning`, which `output` already contains.
     pub fn total(&self) -> i64 {
+        self.split_total() + self.unsplit
+    }
+
+    /// The tokens whose type is known (everything but `unsplit`).
+    pub fn split_total(&self) -> i64 {
         self.input_uncached
             + self.cache_read
             + self.cache_write_5m
@@ -58,7 +66,8 @@ impl Precision {
 /// One deduplicated API call.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageEvent {
-    /// Stable per source; the store keeps a bounded set of these to drop repeats.
+    /// Stable per source; the store keeps a bounded set of these to drop repeats. Empty for a
+    /// source that cannot repeat an event (Codex: deltas of a per-thread cumulative).
     pub dedupe_key: String,
     pub ts_ms: i64,
     pub harness: &'static str,
@@ -68,6 +77,8 @@ pub struct UsageEvent {
     pub parent_session: Option<String>,
     pub cwd: Option<String>,
     pub branch: Option<String>,
+    /// `host/owner/repo` when the harness recorded the remote itself (Codex); else from `cwd`.
+    pub repo: Option<String>,
     pub tokens: Tokens,
     pub precision: Precision,
     /// $ the harness reported itself (omp's `cost.total`), never derived.
@@ -173,7 +184,9 @@ mod tests {
             cache_write_1h: 4,
             output: 5,
             reasoning: 5,
+            unsplit: 6,
         };
-        assert_eq!(t.total(), 15);
+        assert_eq!(t.total(), 21);
+        assert_eq!(t.split_total(), 15);
     }
 }

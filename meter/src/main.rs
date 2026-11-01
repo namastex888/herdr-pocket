@@ -12,11 +12,11 @@ Usage:
   meter status
   meter --version
 
-sync      Read new harness usage (omp, Claude Code) into the local store and publish the
-          summary doc to herdr-core. Does nothing within 10 minutes of a complete sync.
+sync      Read new harness usage (omp, Claude Code, Codex) into the local store and publish
+          the summary doc to herdr-core. Does nothing within 10 minutes of a complete sync.
   --force         Run even if the last sync is recent.
   --backfill      Re-import the full history (slow; resumes across runs).
-  --days N        Import window in days (default 14). A wider window re-imports.
+  --days N        Import window in days (default 30). A wider window re-imports.
   --budget-secs N Stop after N seconds and resume next run (default 20).
   --no-publish    Do not write the summary doc.
   --doc NAME      Doc name to publish to (default herdr-meter).
@@ -177,10 +177,11 @@ fn cmd_status() -> Result<ExitCode, String> {
         "dedupe_keys": store.count("seen").unwrap_or(0),
         "sessions": store.count("sessions").unwrap_or(0),
         "sources": sources.iter().map(|s| serde_json::json!({
-            "harness": s.harness,
+            "harness": s.harness, "status": s.status, "reason": s.reason,
             "last_success": s.last_success_ms.map(format_rfc3339),
             "usage_lines": s.usage_lines, "events": s.events, "duplicates": s.duplicates,
             "skipped_lines": s.skipped_lines, "rewrites": s.rewrites,
+            "threads": s.threads.map(|(e, t)| serde_json::json!({"exact": e, "total_only": t})),
         })).collect::<Vec<_>>(),
         "summary_schema_version": summary::SUMMARY_SCHEMA_VERSION,
     });

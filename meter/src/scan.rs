@@ -94,6 +94,23 @@ pub fn discover(root: &Path, source: Source, out: &mut Vec<Candidate>) {
     }
 }
 
+/// A Codex rollout as a candidate, if it is a regular file (never a symlink).
+pub fn candidate_of(path: &Path) -> Option<Candidate> {
+    let meta = fs::symlink_metadata(path).ok()?;
+    if !meta.file_type().is_file() {
+        return None;
+    }
+    let (dev, ino) = ids(&meta);
+    Some(Candidate {
+        path: path.to_path_buf(),
+        source: Source::Codex,
+        dev,
+        ino,
+        size: meta.len(),
+        mtime_ms: mtime_ms(&meta),
+    })
+}
+
 /// `…/<session>/subagents/<agent>.jsonl` belongs to `<session>`.
 pub fn parent_session(path: &Path) -> Option<String> {
     let dir = path.parent()?;
@@ -180,6 +197,7 @@ pub fn plan(c: &Candidate, prev: Option<FileState>) -> io::Result<Plan> {
                     .map(|s| s.chars().take(128).collect()),
                 parent_session: Some(parent),
                 cwd: None,
+                codex: None,
             },
             None => FileCtx::default(),
         },

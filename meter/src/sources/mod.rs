@@ -2,6 +2,7 @@
 //! any text from the line beyond ids, the model name, the cwd and the branch.
 
 pub mod claude;
+pub mod codex;
 pub mod omp;
 
 use serde::{Deserialize, Serialize};
@@ -12,15 +13,17 @@ use crate::event::UsageEvent;
 pub enum Source {
     Claude,
     Omp,
+    Codex,
 }
 
 impl Source {
-    pub const ALL: [Source; 2] = [Source::Omp, Source::Claude];
+    pub const ALL: [Source; 3] = [Source::Omp, Source::Claude, Source::Codex];
 
     pub fn harness(self) -> &'static str {
         match self {
             Source::Claude => "claude-code",
             Source::Omp => "omp",
+            Source::Codex => "codex",
         }
     }
 
@@ -32,6 +35,7 @@ impl Source {
         match self {
             Source::Claude => claude::parse_line(line, ctx, out),
             Source::Omp => omp::parse_line(line, ctx, out),
+            Source::Codex => codex::parse_line(line, ctx, out),
         }
     }
 }
@@ -45,6 +49,9 @@ pub struct FileCtx {
     pub parent_session: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
+    /// A Codex rollout: the thread it belongs to and its running total.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex: Option<codex::CodexCtx>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
