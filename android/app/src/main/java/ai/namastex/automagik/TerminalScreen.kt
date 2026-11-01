@@ -72,7 +72,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
-@Composable fun TerminalScreen(vm: PocketViewModel, state: PocketState, terminal: CoreTerminal?, space: PocketSpace?, onNavigation: () -> Unit) {
+@Composable fun TerminalScreen(vm: PocketViewModel, state: PocketState, terminal: CoreTerminal?, space: PocketSpace?) {
     val ref = state.selected ?: return
     var message by remember(ref) { mutableStateOf("") }
     var showComposer by remember(ref) { mutableStateOf(false) }
@@ -130,7 +130,6 @@ import kotlin.math.roundToInt
         if (fullscreen && controls) Column(Modifier.align(Alignment.TopCenter).fillMaxWidth().background(Chrome.copy(alpha = .97f))) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = vm::backToList) { Icon(Icons.Outlined.ArrowBack, "Back to agents") }
-                IconButton(onClick = { controls = false; onNavigation() }) { Icon(Icons.Outlined.Menu, "Open navigation") }
                 Text(terminal?.title ?: ref.address, modifier = Modifier.weight(1f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 IconButton(onClick = { controls = false; vm.setTerminalFullscreen(false) }) { Icon(Icons.Outlined.FullscreenExit, "Exit full screen") }
                 IconButton(onClick = { controls = false }) { Icon(Icons.Outlined.Close, "Hide terminal controls") }
