@@ -1,5 +1,16 @@
 package dev.herdr.pocket
 
+import android.Manifest
+import android.app.role.RoleManager
+import android.content.pm.PackageManager
+import android.os.Build
+import android.provider.Settings
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -160,6 +171,7 @@ fun NearbyHost.prefill() = HostProfile("", name, host, "", port)
         AlertRow("Needs you", "When an agent asks something or waits for approval.", state.alertBlocked) { vm.setAlerts(blocked = it) }
         AlertRow("Done", "When an agent finishes a turn while you aren’t looking at it.", state.alertDone) { vm.setAlerts(done = it) }
         AlertRow("Watch in background", "Keep your machines connected when you leave the app, so alerts still arrive. Android shows a “Watching” notification meanwhile.", state.watch) { vm.setWatch(it) }
+        Spacer(Modifier.height(8.dp)); AssistantRow(); Spacer(Modifier.height(8.dp))
         AlertRow("Answer from the lock screen", "Notifications show what the agent asks on the lock screen, and Reply works there without unlocking.", state.lockAnswers) { vm.setLockAnswers(it) }
         Spacer(Modifier.height(4.dp))
         Text("In the app, an alert is a sound and a toast; tap Open to go to its agent. Away from it, alerts are Android notifications you can reply to. They come while Herdr Pocket is connected.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
@@ -171,6 +183,39 @@ fun NearbyHost.prefill() = HostProfile("", name, host, "", port)
         Spacer(Modifier.height(18.dp)); Text("A native companion for your existing herdr-core. Graphite colors, spaces and tabs follow the desktop’s design.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
         Spacer(Modifier.height(10.dp)); Text("With Watch in background on, connections stay open while you’re away and come back on their own after a drop. Otherwise Android may close them; pull down on the agent list or tap Reconnect. Your remote programs keep running.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
         Spacer(Modifier.height(20.dp)); TextButton(onClick = vm::enterDemo, contentPadding = PaddingValues(0.dp)) { Text("Explore the interface with sample data", fontSize = 13.sp) }
+    }
+}
+
+/** Settings: make Herdr Pocket the phone's assistant, so holding the side button opens its panel (lock screen too). */
+@Composable fun AssistantRow() {
+    val context = LocalContext.current
+    fun isHeld() = Build.VERSION.SDK_INT >= 29 && context.getSystemService(RoleManager::class.java).isRoleHeld(RoleManager.ROLE_ASSISTANT)
+    var held by remember { mutableStateOf(isHeld()) }
+    LifecycleResumeEffect(Unit) { held = isHeld(); onPauseOrDispose { } }
+    // Android may not offer the role in a dialog; its Digital assistant settings always can.
+    fun settings() = runCatching { context.startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) }
+        .recoverCatching { context.startActivity(Intent(Settings.ACTION_SETTINGS)) }
+    val role = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { held = isHeld(); if (!held) settings() }
+    fun ask() {
+        val roles = if (Build.VERSION.SDK_INT >= 29) context.getSystemService(RoleManager::class.java) else null
+        if (Build.VERSION.SDK_INT >= 29 && roles != null && roles.isRoleAvailable(RoleManager.ROLE_ASSISTANT) && !held)
+            runCatching { role.launch(roles.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT)) }.onFailure { settings() }
+        else settings()
+    }
+    val mic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ask() }
+    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Side button assistant", fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(2.dp))
+            Text(if (held) "Herdr Pocket is your assistant. Hold the side button to see what needs you and answer by typing or speaking, on the lock screen too."
+                else "Hold the side button to open Herdr over any screen, the lock screen too: see what needs you and answer by typing or speaking.",
+                color = Muted, fontSize = 12.sp, lineHeight = 17.sp)
+        }
+        Spacer(Modifier.width(8.dp))
+        OutlinedButton(onClick = {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) ask()
+            else mic.launch(Manifest.permission.RECORD_AUDIO)
+        }) { Text(if (held) "Change" else "Set up") }
     }
 }
 
