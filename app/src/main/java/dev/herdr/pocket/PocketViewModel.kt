@@ -368,19 +368,47 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         // Android lets the watch service start only from the foreground.
         if (shown) { watchText = ""; syncWatch() }
     }
-    private fun alert(found: List<Alerts.Alert>) {
+    private suspend fun alert(found: List<Alerts.Alert>, client: CoreClient) {
         val s = state.value
         val wanted = found.filter { if (it.kind == Alerts.BLOCKED) s.alertBlocked else s.alertDone }
         if (wanted.isEmpty() || s.demo) return
         val app = getApplication<Application>()
         // Away from the app, Android notifications carry the alert and their channel's sound.
         if (!foreground && Notify.allowed(app)) {
-            wanted.forEach { a -> Notify.post(app, a, detail(a), silent = !s.alertSounds, lockScreen = s.lockAnswers) }
+            wanted.forEach { a -> Notify.post(app, a, detail(a), silent = !s.alertSounds, lockScreen = s.lockAnswers, menu = menu(a, client)) }
             return
         }
         fun looking(a: Alerts.Alert) = foreground && s.selected == a.ref
         if (s.alertSounds && wanted.any { Alerts.sounds(it.kind, looking(it)) }) Alerts.play(app)
         if (foreground) wanted.filterNot(::looking).maxByOrNull { if (it.kind == Alerts.BLOCKED) 1 else 0 }?.let { a -> _state.update { it.copy(alert = a) } }
+    }
+    /** The options a blocked agent shows (a permission or a question), read off its screen; the prompt may draw a moment after its status. */
+    private suspend fun menu(a: Alerts.Alert, client: CoreClient): Prompt.Menu? {
+        if (a.kind != Alerts.BLOCKED || a.terminal.kind !in setOf("permission", "question")) return null
+        repeat(3) { attempt ->
+            if (attempt > 0) delay(500)
+            runCatching { Prompt.menu(client.call("terminal.read", JSONObject().put("terminal", a.ref.address).put("lines", 0)).optString("text")) }
+                .getOrNull()?.let { return it }
+        }
+        return null
+    }
+    /**
+     * A notification's option button: re-reads the agent and presses the keys only if it still asks [msg] with the same
+     * [options] on screen; otherwise nothing is sent. Returns what to show in the notification.
+     */
+    suspend fun choose(ref: TerminalRef, msg: String, options: List<String>, index: Int, label: String): String {
+        val c = clients[ref.hostId] ?: return "Not sent: ${hostName(ref.hostId)} isn’t connected. Open Herdr Pocket to reconnect."
+        if (index !in options.indices) return "Not sent: open the agent to answer."
+        return withTimeoutOrNull(8_000) {
+            runCatching {
+                val now = CoreTerminal.parse(c.call("terminal.get", JSONObject().put("terminal", ref.address)))
+                if (!now.attention || now.message != msg) return@runCatching "Not sent: it isn’t asking that any more."
+                val menu = Prompt.menu(c.call("terminal.read", JSONObject().put("terminal", ref.address).put("lines", 0)).optString("text"))
+                if (menu == null || !Prompt.unchanged(options, menu)) return@runCatching "Not sent: its options changed. Open the agent to answer."
+                c.call("terminal.keys", JSONObject().put("terminal", ref.address).put("keys", JSONArray(Prompt.keys(menu, index))))
+                "You chose: $label"
+            }.getOrElse { e -> "Not sent: ${e.message ?: "the core refused it"}" }
+        } ?: "Not confirmed: check the agent before trying again."
     }
     /** What a notification says under its title: what the agent asks or said, and where it runs. */
     private fun detail(a: Alerts.Alert): String {
@@ -427,7 +455,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         alertBase[id] = client to terminals
         val paned = spaces.flatMap { it.addresses }.toSet()
         updateMachine(id) { it.copy(terminals = terminals, spaces = spaces, linked = linked, error = null) }
-        alert(Alerts.changes(previous, terminals, id) { it.address in paned })
+        alert(Alerts.changes(previous, terminals, id) { it.address in paned }, client)
         Alerts.resolved(previous, terminals, id) { it.address in paned }.forEach { Notify.cancel(getApplication(), it) }
         rememberLinked(id, linked.map { it.name })
         // The desktop assigns colours as spaces appear; read them again now and then, never write them.
