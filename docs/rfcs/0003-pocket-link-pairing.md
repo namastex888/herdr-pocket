@@ -32,10 +32,10 @@ Phone (`android/app/src/main/java/ai/namastex/automagik/`):
   `CoreClient` as SSH (`IrohLink.kt:97`).
 - Pairing sends the code and the phone's make and model (`IrohLink.kt:83`,
   `PocketViewModel.kt:254`).
-- QR scanning: bundled ZXing scanner (`android/app/build.gradle.kts:64`). Deep links open the app
+- QR scanning: bundled ZXing scanner (`android/app/build.gradle.kts:65`). Deep links open the app
   through the `herdr-pocket://pair` intent filter (`AndroidManifest.xml:15`).
-- iroh library: `android/app/build.gradle.kts:62`. ABIs kept: arm64-v8a, armeabi-v7a, x86_64
-  (`:26`); native libraries compressed (`:44`).
+- iroh library: `android/app/build.gradle.kts:63`. ABIs kept: arm64-v8a, armeabi-v7a, x86_64
+  (`:27`); native libraries compressed (`:45`).
 
 Desktop (`desktop/pocket-link/mods/pocket-link/bridge/bridge.mjs`):
 

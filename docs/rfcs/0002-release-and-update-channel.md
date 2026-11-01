@@ -23,7 +23,7 @@ self-update: installed copies update "with no Play Store needed".
 ## Current state
 
 - Version name: `version.properties` at the repo root (`version=0.3.0` when #18 merged), read by
-  `android/app/build.gradle.kts:19`. `scripts/version.sh` prints `current`, computes `next` from
+  `android/app/build.gradle.kts:20`. `scripts/version.sh` prints `current`, computes `next` from
   the `v0.N.0` tags, and `set`s it.
 - Version code: the commit time in minutes since 2025, `android/app/build.gradle.kts:16`, so each
   build is higher than the one before.
@@ -35,14 +35,15 @@ self-update: installed copies update "with no Play Store needed".
 - Update client: `android/app/src/main/java/ai/namastex/automagik/Updater.kt`. It checks at every
   launch (`PocketViewModel.kt:124`) and from **Settings → About → Check for updates**.
 - v0.3.0 is the first release. It was published on 2026-11-01 before #18 merged, so
-  `release.yml` did not cut it. From the next merge on, the workflow cuts releases.
+  `release.yml` did not cut it. Since #19, the workflow cuts every release (its first commit is
+  `chore(release): v0.4.0`).
 
 ## Design
 
 ### The `latest.json` contract
 
 URL that installed copies read: `https://github.com/automagik-dev/automagik-pocket/releases/latest/download/latest.json`
-(`android/app/build.gradle.kts:28`). A build sets another with the Gradle property `pocket.updateUrl`.
+(`android/app/build.gradle.kts:29`). A build sets another with the Gradle property `pocket.updateUrl`.
 
 | Field | Rule in the app (`Updater.kt`) |
 |---|---|

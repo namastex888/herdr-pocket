@@ -91,7 +91,7 @@ Summary, Motivation, Current state, Design, Decisions, Alternatives considered, 
 Related.
 
 - **Current state** says what the code does today and cites `path:line`, for example
-  `android/app/build.gradle.kts:24`. A claim that the code can't show says where it comes from.
+  `android/app/build.gradle.kts:25`. A claim that the code can't show says where it comes from.
 - **Open questions** are numbered, and each says who answers it (usually the owner).
 
 ### 6. Writing rules

@@ -40,7 +40,7 @@ This is the same gate CI runs. The debug APK is
 **On an emulator:**
 
 1. Create a device with an x86_64 or arm64 image, API 26 or newer. 32-bit x86 images won't run
-   it: the APK ships only arm64-v8a, armeabi-v7a and x86_64 (`android/app/build.gradle.kts:26`).
+   it: the APK ships only arm64-v8a, armeabi-v7a and x86_64 (`android/app/build.gradle.kts:27`).
 2. Install the APK as above.
 3. Without a machine, use **Settings → About → Explore the interface with sample data**.
 4. To pair, paste the Pocket Link link instead of scanning: the emulator camera can't see a real
@@ -89,7 +89,7 @@ same key.
 - **A maintainer's machine** keeps the key in `~/.config/herdr-pocket/`: the keystore, a password
   file, and `signing.properties` with `storeFile`, `passwordFile` and `alias` (default `pocket`).
   The environment variables `POCKET_SIGNING_STORE` and `POCKET_SIGNING_PASSWORD` override it
-  (`android/app/build.gradle.kts:5-13`).
+  (`android/app/build.gradle.kts:5-12`).
 - With the key present, debug builds are signed with it too, so a build from Android Studio and the
   releases update each other. Without it, builds are debug-signed.
 - Never commit a key: `*.jks` and `*.keystore` are in `.gitignore`. Never regenerate the key;

@@ -21,12 +21,12 @@ Decisions where the pull request gave one.
 
 ## Current state
 
-- App ID and namespace: `android/app/build.gradle.kts:22` and `:24`, `ai.namastex.automagik`.
+- App ID and namespace: `android/app/build.gradle.kts:23` and `:25`, `ai.namastex.automagik`.
 - Launcher label "Automagik": `android/app/src/main/AndroidManifest.xml:11`.
 - Stage colours, light and dark, picked by the phone's setting:
   `android/app/src/main/java/ai/namastex/automagik/Theme.kt:14-35`. The terminal stays dark in
   both modes: `Theme.kt:37`.
-- Update feed of installed copies points at the new repo: `android/app/build.gradle.kts:28`.
+- Update feed of installed copies points at the new repo: `android/app/build.gradle.kts:29`.
 - Old names still in the code (not user-facing unless noted):
   - URL scheme `herdr-pocket://pair` and iroh ALPNs `herdr-pocket/1`, `herdr-pocket/pair/1`:
     `IrohLink.kt:34`, `:55-56`. These are a protocol shared with the desktop mod.
