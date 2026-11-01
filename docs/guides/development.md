@@ -26,19 +26,40 @@ Build, test and run Automagik Pocket from source. Releases are in [releasing.md]
 
 ```sh
 cd android
-./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+./gradlew :app:assembleGithubDebug :app:testGithubDebugUnitTest :app:lintGithubDebug \
+  :app:assemblePlayDebug :app:testPlayDebugUnitTest :app:lintPlayDebug
 ```
 
-This is the same gate CI runs. The debug APK is
-`android/app/build/outputs/apk/debug/app-debug.apk`.
+This is the gate CI runs, for both flavors ([RFC 0006](../rfcs/0006-distribution-flavors.md)):
+
+| Flavor | What it is | Debug APK |
+|---|---|---|
+| `github` (default) | The GitHub release; updates itself from `latest.json` | `android/app/build/outputs/apk/github/debug/app-github-debug.apk` |
+| `play` | The Google Play build; no updater, no installer permission | `android/app/build/outputs/apk/play/debug/app-play-debug.apk` |
+
+Self-update code lives only in `android/app/src/github/`; main code reaches it through the
+`SelfUpdate` hooks, which `android/app/src/play/` implements as no-ops. Building a variant runs
+`verify<Variant>UpdaterManifest`, which fails if a play manifest gains an installer permission or
+updater receiver, or a github one loses them.
+
+The Play bundle, signed with the release key when it's on this machine:
+`./gradlew :app:bundlePlayRelease` →
+`android/app/build/outputs/bundle/playRelease/app-play-release.aab`.
 
 **16 KB pages.** Play requires every native library to support 16 KB memory pages. JNA is pinned
-to 5.17.0 (`android/app/build.gradle.kts:66-71`) because iroh-android 1.2.0 brings 5.15.0, whose
-`libjnidispatch.so` isn't 16 KB aligned. Drop the pin when iroh-android depends on JNA 5.17 or newer.
+to 5.17.0 (`android/app/build.gradle.kts`, the `net.java.dev.jna:jna` line) because iroh-android
+1.2.0 brings 5.15.0, whose `libjnidispatch.so` isn't 16 KB aligned. Drop the pin when iroh-android
+depends on JNA 5.17 or newer.
+
+Packaging differs by flavor. `github` keeps `jniLibs.useLegacyPackaging = true`: the libraries are
+compressed in `automagik.apk` (about half the download) and extracted at install. `play` sets it to
+false for its variants (`androidComponents.onVariants`): the bundle asks for the libraries stored
+uncompressed and 16 KB-aligned in the APKs Play generates (`extractNativeLibs="false"`), so Android
+loads them in place.
 
 ## 3. Run it
 
-**On a phone:** `adb install -r android/app/build/outputs/apk/debug/app-debug.apk`. Android 8.0
+**On a phone:** `adb install -r android/app/build/outputs/apk/github/debug/app-github-debug.apk`. Android 8.0
 (API 26) or newer.
 
 **On an emulator:**

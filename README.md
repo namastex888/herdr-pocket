@@ -52,12 +52,12 @@ More detail: [docs/guides/using.md](docs/guides/using.md).
 - **Watch in background:** stays connected while you're away and reconnects on its own.
 - **Side-button assistant:** hold the side button, even on the lock screen, to see what needs you
   and answer by typing or speaking.
-- **Updates itself** from GitHub Releases, in the background.
+- **Updates itself** from GitHub Releases, in the background (the GitHub build; Google Play updates the Play build).
 - **Automagik Stage theme,** light and dark, following the phone.
 
 ## Privacy and safety
 
-- The app talks only to your own machines, plus GitHub to check for updates. Pocket Link traffic
+- The app talks only to your own machines, plus GitHub to check for updates (GitHub build only). Pocket Link traffic
   is end-to-end encrypted, even through n0's relays.
 - No analytics, no ads, no account.
 - Answering from the lock screen is off until you turn it on.
@@ -75,6 +75,8 @@ More detail: [docs/guides/using.md](docs/guides/using.md).
 
 ## Updates
 
+From Google Play, Google Play updates the app. The GitHub build (`automagik.apk`) updates itself:
+
 1. The app checks when it opens and every 6 hours while it or **Watch in background** runs. Or tap
    **Settings → About → Check for updates**.
 2. On Android 12 and newer, once Automagik may install apps, a new version downloads on Wi-Fi and
@@ -90,8 +92,11 @@ install the release.
 ## Build from source
 
 ```sh
-cd android && ./gradlew :app:assembleDebug
+cd android && ./gradlew :app:assembleGithubDebug
 ```
+
+The app builds in two flavors: `github` (the GitHub release, updates itself) and `play` (the Google
+Play bundle, updated by Play): [RFC 0006](docs/rfcs/0006-distribution-flavors.md).
 
 Requirements, tests and the emulator: [docs/guides/development.md](docs/guides/development.md).
 How releases are cut: [docs/guides/releasing.md](docs/guides/releasing.md).

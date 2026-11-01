@@ -128,7 +128,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
                 .onFailure { e -> _state.update { it.copy(message = "Could not create SSH key: ${e.message}") } }
         }
         // Opening the app checks for an update (setForeground); this tells a waiting one when installing would interrupt.
-        Updater.usage = { val s = state.value; Updater.Usage(foreground, s.selected != null, watchText.isNotEmpty()) }
+        SelfUpdate.onLaunch({ foreground }, { state.value.selected != null }, { watchText.isNotEmpty() })
         ProgramIcons.load(application)
         viewModelScope.launch(Dispatchers.IO) {
             while (true) {
@@ -405,7 +405,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         foreground = shown
         // Android lets the watch service start only from the foreground.
         if (shown) { watchText = ""; syncWatch() }
-        if (shown) Updater.opened() else Updater.left()
+        SelfUpdate.foreground(shown)
     }
     private suspend fun alert(found: List<Alerts.Alert>, client: CoreClient) {
         val s = state.value

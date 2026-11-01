@@ -48,7 +48,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.util.UUID
@@ -71,12 +70,12 @@ class MainActivity : ComponentActivity() {
     }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); openLink(intent); openAlert(intent); openUpdate(intent) }
     // A waiting update doesn't install under someone using the app.
-    override fun onUserInteraction() { super.onUserInteraction(); Updater.touched() }
+    override fun onUserInteraction() { super.onUserInteraction(); SelfUpdate.touched() }
     // The "ready" notification: show Settings → About, where the update's progress is, and run Android's confirm flow.
     private fun openUpdate(intent: Intent?) {
-        if (intent?.action != Updater.ACTION_INSTALL) return
+        if (!SelfUpdate.isInstallIntent(intent)) return
         vm.navigate(Nav.SETTINGS)
-        Updater.installFromNotification(this)
+        SelfUpdate.installFromNotification(this)
         setIntent(Intent(this, MainActivity::class.java))
     }
     // A notification's tap opens its agent.
@@ -148,17 +147,9 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
     val gitScreen = selected == null && (state.screen == Nav.PROJECTS || state.screen == Nav.TASKS)
     LaunchedEffect(gitScreen) { vm.gitShown(gitScreen) }
     LaunchedEffect(state.message) { state.message?.let { snackbar.showSnackbar(it); vm.dismissMessage() } }
-    // Self-update runs in the background and speaks through notifications (see Updater); the screen only opens Android's
-    // confirm prompt for an install the person started, and continues after the install permission screen.
-    val update by Updater.state.collectAsStateWithLifecycle()
-    LaunchedEffect(update) {
-        when (val u = update) {
-            is UpdateState.Confirm -> { runCatching { activity?.startActivity(u.intent) }; Updater.confirming(u.release) }
-            is UpdateState.Available -> if (Updater.takeStartWhenFound()) activity?.let(Updater::start)
-            else -> {}
-        }
-    }
-    LifecycleResumeEffect(Unit) { activity?.let(Updater::resume); onPauseOrDispose { } }
+    // Self-update runs in the background and speaks through notifications; the screen only opens Android's confirm
+    // prompt for an install the person started. github flavor only (src/github/.../SelfUpdate.kt); play's do nothing.
+    SelfUpdateEffects()
     LifecycleStartEffect(Unit) { vm.setForeground(true); onStopOrDispose { vm.setForeground(false) } }
     // Android 13+ asks before an app's first notification: once, when a machine first connects.
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -209,7 +200,7 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
                     if (root && state.screen == Nav.MACHINES) IconButton(onClick = { addHost = true }) { Icon(Icons.Outlined.Add, "Add machine", tint = Accent) }
                     if (root) IconButton(onClick = { vm.navigate(Nav.SETTINGS) }) { Icon(Icons.Outlined.Settings, "Settings", tint = Muted) }
                 }
-                (update as? UpdateState.Downloading)?.takeIf { it.manual }?.let { LinearProgressIndicator(progress = { it.progress }, Modifier.fillMaxWidth().height(2.dp), color = Accent, trackColor = Border) }
+                selfUpdateProgress()?.let { p -> LinearProgressIndicator(progress = { p }, Modifier.fillMaxWidth().height(2.dp), color = Accent, trackColor = Border) }
                     ?: HorizontalDivider(color = Border)
                 if (state.demo) Row(Modifier.fillMaxWidth().background(Accent.copy(alpha = .09f)).padding(start = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Interface preview · sample data", color = Accent, fontSize = 12.sp, modifier = Modifier.weight(1f))

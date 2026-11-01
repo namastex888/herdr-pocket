@@ -1,0 +1,7 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+    <!-- Google Play installs and updates this flavor, so it drops what self-update needs from src/main
+         (docs/rfcs/0006-distribution-flavors.md). verifyPlay*UpdaterManifest fails the build if an installer
+         permission or an updater receiver comes back. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" tools:node="remove" />
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" tools:node="remove" />
+</manifest>
