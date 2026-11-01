@@ -96,7 +96,7 @@ class ProjectsTest {
     }
 
     @Test fun branchesAreTasksAndTrunksAreUntasked() {
-        listOf("main", "master", "dev", "(detached)", "", null).forEach { assertNull(it, Projects.task(it)) }
+        listOf("main", "master", "dev", "develop", "trunk", "HEAD", "(detached)", "", null).forEach { assertNull(it, Projects.task(it)) }
         assertEquals("feat/x", Projects.task("feat/x"))
         val tasks = Projects.tasks(projects(host))
         fun of(project: String) = tasks.filter { it.projectName == project }.map { "${it.title}:${it.agents.joinToString(",") { a -> a.ref.address }}" }
