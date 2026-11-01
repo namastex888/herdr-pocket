@@ -15,7 +15,33 @@ it talks to is the local `hc`.
 | omp | `~/.omp/agent/sessions/**/*.jsonl` | Assistant messages and side calls (`model_usage`). omp's own `cost.total` is kept as reported $. No branch is recorded. |
 | Claude Code | `~/.claude/projects/**/*.jsonl` (or `$CLAUDE_CONFIG_DIR/projects`) | Includes `<session>/subagents/*.jsonl`, rolled up to the parent session. Repeated lines are deduplicated by `message.id` + `requestId`. Advisor calls (`usage.iterations[]`, `type: advisor_message`) count under the advisor's model. 5-minute and 1-hour cache writes are kept apart. |
 
-Codex is not read yet.
+| Codex | `~/.codex/state_<N>.sqlite` (highest N) and the rollouts it names under `~/.codex/sessions` or `~/.codex/archived_sessions` (or `$CODEX_HOME`) | See below. |
+
+Codex:
+
+- The state database is opened read-only (`mode=ro`, busy timeout 2 s) for one indexed query on
+  `threads` changed since the last run (`updated_at_ms`, minus 10 minutes of slack), plus the
+  spawn edges, then closed. Its columns are checked first; if one the meter reads is missing,
+  Codex shows `unsupported` and nothing from it is counted. Codex's other databases (thread
+  history, logs, memories) are never opened. A read-only open of a database in WAL mode may still
+  create its `-shm` file if Codex is not running; it never writes data.
+- A rollout's `token_count` events carry the thread's running total (`total_token_usage`), with
+  cached input inside input and reasoning inside output. The meter keeps the highest total per
+  thread id (not per path: rollouts move to `archived_sessions`) and counts the difference, at the
+  event's own hour: `input_uncached = input − cached`, `cache_read = cached`. `last_token_usage`
+  is not used: Codex repeats events, and summing it counts them again. A total that goes down is
+  counted as 0 and shown as `degraded`.
+- The first read of a rollout goes through the whole file (in chunks, within the time budget,
+  resumable); later runs read only what was appended. A renamed rollout keeps its offset; one
+  read again from the start (rewritten or copied) adds nothing already counted.
+- A thread whose rollout is missing, or has no readable total (once idle for an hour), is
+  counted from `threads.tokens_used` as `total_only`: the growth since the last run, at the hour
+  of `updated_at_ms`, with no split and no $. A `token_count` line of an unknown shape makes the
+  source `degraded` and its thread falls back to `tokens_used`.
+- Sub-agent threads are counted on their own (a parent's total does not include its children's);
+  the parent is kept as `parent_session`.
+- The repo comes from `threads.git_origin_url` (credentials stripped), else from the cwd; the
+  branch from `git_branch`, the model from `model`.
 
 Logs are read incrementally from a saved byte offset, in 8 MB chunks. A line still being written
 waits for the next run. A file whose inode, size or first 4 KB changed is read again from the start,
@@ -32,7 +58,8 @@ One SQLite file (WAL) per machine:
 
 The directory is 0700 and the file 0600. Rows are hourly `agent.usage` rollups keyed by (bot, role,
 harness, model, machine, repo, branch, hour), with `input_uncached`, `cache_read`,
-`cache_write_5m`, `cache_write_1h`, `output`, `reasoning` (part of output) and `precision`. The
+`cache_write_5m`, `cache_write_1h`, `output`, `reasoning` (part of output), `unsplit` (tokens
+known only as a total) and `precision` (`total_only` when the row has `unsplit` tokens). The
 `ae_usage` view renders each row as an `ae/1` envelope. No prompt text, titles, file contents or
 per-turn rows are stored, and no $ except omp's reported cost.
 
@@ -48,7 +75,7 @@ per-turn rows are stored, and no $ except omp's reported cost.
 ```sh
 meter sync                 # the normal run: at most 20 s, then publish
 meter sync --no-publish    # update the store only
-meter sync --backfill      # import the full history instead of 14 days (resumes across runs)
+meter sync --backfill      # import the full history instead of 30 days (resumes across runs)
 meter status               # what the store holds, as JSON
 meter --version
 ```
@@ -57,6 +84,8 @@ meter --version
 widening it re-imports), `--budget-secs N` (default 20), `--no-publish`, `--doc NAME` (default
 `herdr-meter`).
 
+- The first run imports 30 days, what the summary doc shows. A store first filled when the
+  default was 14 days keeps 14 until a sync with `--days 30` widens it.
 - One run per machine: a second `meter sync` while one runs exits 0 at once.
 - A sync within 10 minutes of a complete one does nothing unless `--force`.
 - When the budget runs out, progress so far is committed and the rest waits for the next run. A
@@ -100,7 +129,8 @@ A synthetic example (`schema_version` 2, numbers made up, arrays shortened):
     "claude-code": {"status": "ok", "last_success": "2026-01-15T12:04:00Z", "usage_lines": 900,
                     "events": 450, "duplicates": 450, "skipped_lines": 0, "rewrites": 0,
                     "unknown_models": []},
-    "codex": {"status": "degraded", "reason": "2 threads have no rollout file; counted as total_only",
+    "codex": {"status": "degraded",
+              "reason": "3 token_count lines in an unknown format; their threads count as total_only",
               "last_success": "2026-01-15T12:04:00Z", "usage_lines": 120, "events": 118,
               "duplicates": 0, "skipped_lines": 0, "rewrites": 0, "unknown_models": ["model-x"],
               "threads": {"exact": 30, "total_only": 2}}
@@ -188,7 +218,8 @@ Projects and tasks:
 | Key | Meaning |
 |---|---|
 | `branch` | The git branch the agent recorded. omp records none. |
-| task | A (repo, branch) whose branch is not `main`, `master`, `dev`, `develop`, `trunk` or missing. Work on those goes to the project's `untasked` bucket instead. |
+| task | A (repo, branch) whose branch is not `main`, `master`, `dev`, `develop`, `trunk`, `HEAD` or missing. Work on those goes to the project's `untasked` bucket instead. |
+| `untasked` | The project's untasked work over the `d30` window. |
 | `tasks` (on a project) | Number of tasks with usage in `d30`. |
 | `usd_per_task` | The project's tasked `d30` $ (excluding `untasked`) divided by `tasks`. Absent with no tasks or no $. |
 | `hours` | Distinct hours with usage in `d30`: a rough measure of time spent. |

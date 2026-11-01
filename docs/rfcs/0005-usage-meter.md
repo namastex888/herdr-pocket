@@ -23,11 +23,19 @@ everything under Design and Alternatives is a proposal, not a decision.
 
 ## Current state
 
-- `meter/` holds the first slice ([meter/README.md](../../meter/README.md)): `meter sync` reads
-  omp and Claude Code logs into hourly `agent.usage` rows in a per-machine SQLite file and
-  publishes a `herdr-meter` summary doc with `doc.get`/`doc.set`. Codex, the desktop trigger,
-  the phone display and installers are not built yet. The design below predates it; where they
+- `meter/` ([meter/README.md](../../meter/README.md)): `meter sync` reads omp, Claude Code and
+  Codex usage into hourly `agent.usage` rows in a per-machine SQLite file and publishes a
+  `herdr-meter` summary doc with `doc.get`/`doc.set`. The design below predates it; where they
   differ (one row per rollup hour rather than per event; the doc's fields), the code is current.
+- Codex: thread list from its state database (read-only, one query), usage from the running
+  totals in each rollout. Threads with no rollout file are counted from `tokens_used` as
+  `total_only` (no split, no $); on a busy machine they can be a large share of usage. `ae/1`
+  revision 2 has no field for an unsplit total, so the meter adds `data.unsplit`; this needs to
+  go back to the envelope's owner.
+- Summary doc schema version 2 (the phone's contract, in the README): per-project, per-task
+  (repo + branch) and per-model 24 h / 7 d / 30 d windows, per-harness hourly (48 h) and daily
+  (30 d) series. It fits 64 KiB by cutting the task list, then the project list, into `*_other`.
+- The desktop trigger, installers and the phone display are not built yet.
 - The app already reads herdr-core documents: it calls `doc.get` for the `herdr-app` document,
   locally and on forwarded machines (`android/app/src/main/java/ai/namastex/automagik/PocketViewModel.kt:440`,
   `:446`). A summary document would travel the same way.

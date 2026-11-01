@@ -201,12 +201,40 @@ fn a_thread_without_a_rollout_counts_its_total_only() {
     assert!(m["d30"].get("usd").is_none());
     assert_eq!(doc["sources"]["codex"]["threads"]["total_only"], 1);
 
-    // tokens_used is a running total too: only the growth is new.
-    cx.thread("t-gone", &gone, 9000, "2026-01-15T09:30:00Z");
+    // tokens_used is a running total too: only the growth is new (here in the same hour's row).
+    cx.thread("t-gone", &gone, 9000, "2026-01-15T08:50:00Z");
     env.run(&env.opts());
     assert_eq!(codex_total(&env).unsplit, 9000);
     env.run(&env.opts());
     assert_eq!(codex_total(&env).unsplit, 9000);
+}
+
+#[test]
+fn a_thread_counted_from_its_total_and_later_found_on_disk_is_not_counted_twice() {
+    let env = Env::new();
+    let cx = Codex::new(&env);
+    let f = cx.rollout("t-1");
+    cx.thread("t-1", &f, 3300, "2026-01-15T10:20:00Z");
+    env.run(&env.opts());
+    assert_eq!(codex_total(&env).unsplit, 3300);
+    // The rollout turns up, with what was counted and more (3300 is between two of its totals).
+    write_lines(
+        &f,
+        &[
+            tc("2026-01-15T09:10:00Z", 1000, 800, 100, 40),
+            tc("2026-01-15T10:20:00Z", 3000, 2500, 250, 90),
+            tc("2026-01-15T11:00:00Z", 4000, 3300, 300, 90),
+            tc("2026-01-15T11:30:00Z", 5000, 4200, 400, 100),
+        ],
+    );
+    cx.thread("t-1", &f, 5400, "2026-01-15T11:30:00Z");
+    env.run(&env.opts());
+    let t = codex_total(&env);
+    assert_eq!(t.total(), 5400, "nothing counted twice");
+    // The first total past what was counted has no reliable split; the next one does.
+    assert_eq!(t.unsplit, 3300 + 1000);
+    assert_eq!(t.split_total(), 1100);
+    assert!(codex_rows(&env).iter().all(|r| r.tokens.unsplit >= 0));
 }
 
 #[test]
@@ -296,6 +324,32 @@ fn usage_before_the_window_advances_the_total_without_counting() {
 }
 
 #[test]
+fn widening_the_window_reimports_codex_whole() {
+    let env = Env::new();
+    let cx = Codex::new(&env);
+    let f = cx.rollout("t-1");
+    write_lines(
+        &f,
+        &[
+            tc("2025-11-20T09:00:00Z", 1000, 800, 100, 0),
+            tc("2026-01-15T09:00:00Z", 3000, 2500, 250, 0),
+        ],
+    );
+    cx.thread("t-1", &f, 3250, "2026-01-15T09:00:00Z");
+    let gone = cx.rollout("t-gone");
+    cx.thread("t-gone", &gone, 500, "2026-01-15T08:00:00Z");
+    env.run(&env.opts());
+    assert_eq!(codex_total(&env).split_total(), 2150);
+    let mut o = env.opts();
+    o.days = Some(90);
+    let r = env.run(&o);
+    assert!(r.reimported);
+    let t = codex_total(&env);
+    assert_eq!(t.split_total(), 3250, "the older usage now counts too");
+    assert_eq!(t.unsplit, 500);
+}
+
+#[test]
 fn an_unknown_rollout_shape_is_degraded_and_falls_back_to_the_total() {
     let env = Env::new();
     let cx = Codex::new(&env);
@@ -304,19 +358,32 @@ fn an_unknown_rollout_shape_is_degraded_and_falls_back_to_the_total() {
     let line = tc("2026-01-15T09:10:00Z", 1000, 800, 100, 40).replace("input_tokens", "tokens_in");
     write_lines(&f, &[line]);
     cx.thread("t-1", &f, 1100, "2026-01-15T09:10:00Z");
+    // A thread still running, whose newer line changed shape: the gap counts as a total.
+    let g = cx.rollout("t-2");
+    let newer = tc("2026-01-15T11:50:00Z", 2000, 1500, 200, 0)
+        .replace("\"total_tokens\":2200", "\"total\":2200");
+    write_lines(&g, &[tc("2026-01-15T11:40:00Z", 1000, 800, 100, 40), newer]);
+    cx.thread("t-2", &g, 2200, "2026-01-15T11:50:00Z");
     let r = env.run(&env.opts());
+    let t2: Tokens = codex_rows(&env)
+        .iter()
+        .filter(|r| r.key.hour_ms == parse_rfc3339("2026-01-15T11:00:00Z").unwrap())
+        .fold(Tokens::default(), |mut a, r| {
+            a.add(&r.tokens);
+            a
+        });
+    assert_eq!(t2.split_total(), 1100);
+    assert_eq!(t2.unsplit, 1100);
     let doc = r.summary.unwrap();
     let codex = &doc["sources"]["codex"];
     assert_eq!(codex["status"], "degraded");
     assert!(codex["reason"].as_str().unwrap().contains("unknown format"));
-    assert_eq!(
-        codex_total(&env),
-        Tokens {
-            unsplit: 1100,
-            ..Tokens::default()
-        },
-        "counted as a total, not as zero"
-    );
+    let t1: i64 = codex_rows(&env)
+        .iter()
+        .filter(|r| r.key.hour_ms == parse_rfc3339("2026-01-15T09:00:00Z").unwrap())
+        .map(|r| r.tokens.unsplit)
+        .sum();
+    assert_eq!(t1, 1100, "counted as a total, not as zero");
 }
 
 #[test]
@@ -329,7 +396,7 @@ fn a_state_database_of_another_shape_is_unsupported_not_zero() {
     let doc = r.summary.unwrap();
     let codex = &doc["sources"]["codex"];
     assert_eq!(codex["status"], "unsupported");
-    assert!(codex["reason"].as_str().unwrap().contains("git_origin_url"));
+    assert_eq!(codex["reason"], "threads lacks git_origin_url");
     assert!(codex_rows(&env).is_empty());
     // The other harnesses are unaffected.
     assert_eq!(doc["sources"]["claude-code"]["status"], "ok");

@@ -252,6 +252,8 @@ fn total_only_and_unpriced_tokens_never_unprice_the_rest() {
     let only_priced = build(&rows[..1], summary::DEFAULT_CAP_BYTES).0;
     let t = &doc["tasks"][0]["d30"];
     assert_eq!(t["un"], 7000);
+    assert_eq!(t["in"], 10, "a total is never counted as input");
+    assert_eq!(tokens_of(t), 1070 + 7010);
     assert_eq!(
         t["unpriced"],
         7000 + 10,

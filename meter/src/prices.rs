@@ -32,8 +32,9 @@ impl Price {
     }
 }
 
-/// Anthropic first-party list prices, USD per million tokens. Cache writes are 1.25x (5 minutes)
-/// and 2x (1 hour) the input price.
+/// Anthropic first-party list prices (2026-10-06) and OpenAI list prices (2026-11-01), USD per
+/// million tokens. Anthropic cache writes are 1.25x (5 minutes) and 2x (1 hour) the input price.
+/// The table's date is its oldest entry's.
 pub const BUNDLED_DATE: &str = "2026-10-06";
 
 const fn p(input: f64, output: f64, cache_read: f64) -> Price {
@@ -61,7 +62,24 @@ const BUNDLED: &[(&str, Price)] = &[
     ("claude-sonnet-4-6", p(3.0, 15.0, 0.30)),
     ("claude-haiku-5-5", p(0.10, 0.50, 0.01)),
     ("claude-haiku-4-5", p(1.0, 5.0, 0.10)),
+    // OpenAI list prices, Standard tier, short context (prompts up to 272K tokens), from
+    // https://developers.openai.com/api/docs/pricing, read 2026-11-01. OpenAI bills no separate
+    // cache write, and Codex reports none: a write is priced as input. Longer prompts cost more,
+    // so these rows can only be underestimates.
+    ("gpt-6.1-sol", o(2.0, 10.0, 0.10)),
+    ("gpt-6-astra", o(10.0, 50.0, 1.0)),
+    ("gpt-6.1-terra", o(1.0, 5.0, 0.05)),
 ];
+
+const fn o(input: f64, output: f64, cache_read: f64) -> Price {
+    Price {
+        input,
+        output,
+        cache_read,
+        cache_write_5m: input,
+        cache_write_1h: input,
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct PriceTable {
