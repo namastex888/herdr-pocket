@@ -56,7 +56,7 @@ jobs:
       - uses: android-actions/setup-android@v3
         if: steps.new.outputs.release == 'true'
         with:
-          packages: 'platforms;android-35 build-tools;35.0.0'
+          packages: 'platforms;android-36 build-tools;35.0.0'
 
       - uses: gradle/actions/setup-gradle@v4
         if: steps.new.outputs.release == 'true'
@@ -64,7 +64,9 @@ jobs:
       - name: The gates the release stands on
         if: steps.new.outputs.release == 'true'
         working-directory: android
-        run: ./gradlew --stacktrace :app:testDebugUnitTest :app:lintDebug
+        run: >-
+          ./gradlew --stacktrace
+          :app:testGithubDebugUnitTest :app:lintGithubDebug :app:testPlayDebugUnitTest :app:lintPlayDebug
 
       - name: The meter's tests
         if: steps.new.outputs.release == 'true'
@@ -131,12 +133,14 @@ jobs:
       - uses: android-actions/setup-android@v3
         if: steps.app.outputs.same != 'true'
         with:
-          packages: 'platforms;android-35 build-tools;35.0.0'
+          packages: 'platforms;android-36 build-tools;35.0.0'
 
       - uses: gradle/actions/setup-gradle@v4
         if: steps.app.outputs.same != 'true'
 
-      - name: Build the release APK
+      # The github flavor's APK is the release asset; the play flavor's bundle, signed with the same key, is
+      # kept as a workflow artifact for Google Play and is never attached to the release.
+      - name: Build the release APK and the Play bundle
         if: steps.app.outputs.same != 'true'
         working-directory: android
         env:
@@ -149,7 +153,7 @@ jobs:
           fi
           export POCKET_SIGNING_STORE="$RUNNER_TEMP/pocket.jks"
           echo "$KEYSTORE" | base64 -d > "$POCKET_SIGNING_STORE"
-          ./gradlew --stacktrace :app:assembleRelease
+          ./gradlew --stacktrace :app:assembleGithubRelease :app:bundlePlayRelease
           rm -f "$POCKET_SIGNING_STORE"
 
       - name: Publish
@@ -171,11 +175,11 @@ jobs:
             name=$(jq -r '.versionName' latest.json)
             app="The app is unchanged: \`automagik.apk\` is still ${name}, so phones don't update."
           else
-            meta=android/app/build/outputs/apk/release/output-metadata.json
+            meta=android/app/build/outputs/apk/github/release/output-metadata.json
             code=$(jq -r '.elements[0].versionCode' "$meta")
             name=$(jq -r '.elements[0].versionName' "$meta")
             [ "$name" = "$VERSION" ] || { echo "::error::the APK says ${name}, the tag says ${VERSION}"; exit 1; }
-            cp android/app/build/outputs/apk/release/app-release.apk automagik.apk
+            cp android/app/build/outputs/apk/github/release/app-github-release.apk automagik.apk
             sha=$(sha256sum automagik.apk | cut -d' ' -f1)
             summary=$(printf '%s\n' "$changes" | head -5 | sed 's/^- //' | paste -sd ';' - | head -c 400)
             jq -n --argjson code "$code" --arg name "$name" --arg sha "$sha" --arg notes "$summary" \
@@ -186,6 +190,30 @@ jobs:
           printf '%s\n\n%s%sSHA-256 of `automagik.apk`: `%s`\n' "${changes:-- Maintenance.}" "$app" "${app:+ }" "$sha" > notes.md
           gh release create "$tag" automagik.apk latest.json --verify-tag --latest \
             --title "Automagik Pocket ${VERSION}" --notes-file notes.md
+
+      # A carried-forward release built no app, so it has no new bundle either.
+      - name: Name the Play bundle
+        id: aab
+        if: steps.app.outputs.same != 'true'
+        run: |
+          set -euo pipefail
+          meta=android/app/build/outputs/apk/github/release/output-metadata.json
+          name="automagik-play-${VERSION}-$(jq -r '.elements[0].versionCode' "$meta").aab"
+          cp android/app/build/outputs/bundle/playRelease/app-play-release.aab "$name"
+          # The release key's certificate (public; SECURITY.md). A bundle signed with anything else must not ship.
+          expected=592dced909107ab43e7e41742c927b22f68ca78325cd8654f380d358430f9183
+          signer=$(keytool -printcert -jarfile "$name" | sed -n 's/^[[:space:]]*SHA256: //p' | tr -d ':' | tr 'A-F' 'a-f')
+          echo "signer certificate SHA-256: ${signer}"
+          [ "$signer" = "$expected" ] || { echo "::error::the Play bundle is signed with ${signer:-no certificate}, not the release key"; exit 1; }
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      # For whoever uploads to Google Play; a workflow artifact, not a public release asset.
+      - uses: actions/upload-artifact@v4
+        if: steps.app.outputs.same != 'true'
+        with:
+          name: ${{ steps.aab.outputs.name }}
+          path: ${{ steps.aab.outputs.name }}
+          if-no-files-found: error
 
   # The usage meter rides along: its binaries are built from the same tag and added to the release
   # after the APK is out, so a meter build problem never holds the app back.

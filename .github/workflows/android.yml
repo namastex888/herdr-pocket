@@ -28,21 +28,28 @@ jobs:
 
       - uses: android-actions/setup-android@v3
         with:
-          packages: 'platforms;android-35 build-tools;35.0.0'
+          packages: 'platforms;android-36 build-tools;35.0.0'
 
       # Validates the wrapper checksum and caches Gradle dependencies.
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Build debug APK, run unit tests and lint
+      # Both distributions (docs/rfcs/0006-distribution-flavors.md): github, the GitHub releases with the
+      # self-updater, and play, the Google Play bundle without it. Building a variant also runs its
+      # verify<Variant>UpdaterManifest check; the play bundle here is debug-signed, only to check it builds.
+      - name: Build both flavors, run unit tests and lint
         working-directory: android
-        run: ./gradlew --stacktrace :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+        run: >-
+          ./gradlew --stacktrace
+          :app:assembleGithubDebug :app:testGithubDebugUnitTest :app:lintGithubDebug
+          :app:assemblePlayDebug :app:testPlayDebugUnitTest :app:lintPlayDebug
+          :app:bundlePlayRelease
 
       - name: Name APK
         id: apk
         run: |
           version=$(scripts/version.sh current)
           name="automagik-${version}-${GITHUB_SHA::7}-debug.apk"
-          cp android/app/build/outputs/apk/debug/app-debug.apk "$name"
+          cp android/app/build/outputs/apk/github/debug/app-github-debug.apk "$name"
           echo "name=$name" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
