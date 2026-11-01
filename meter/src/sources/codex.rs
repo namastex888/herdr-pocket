@@ -264,6 +264,8 @@ pub enum State {
     Absent,
     /// The database is there but not in a shape the meter knows.
     Unsupported(String),
+    /// The database could not be opened or read this time (locked, permissions).
+    Unreadable(String),
     Threads {
         threads: Vec<Thread>,
         /// child thread id → parent thread id.
@@ -334,7 +336,7 @@ pub fn read_state(db: &Path, since_ms: i64) -> State {
             | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     ) {
         Ok(c) => c,
-        Err(e) => return State::Unsupported(format!("cannot open the state database: {e}")),
+        Err(e) => return State::Unreadable(format!("cannot open the state database: {e}")),
     };
     let run = || -> Result<State, String> {
         conn.busy_timeout(Duration::from_secs(2))
@@ -398,7 +400,7 @@ pub fn read_state(db: &Path, since_ms: i64) -> State {
         }
         Ok(State::Threads { threads, parents })
     };
-    let out = run().unwrap_or_else(|e| State::Unsupported(format!("cannot read threads: {e}")));
+    let out = run().unwrap_or_else(|e| State::Unreadable(format!("cannot read threads: {e}")));
     drop(conn);
     out
 }
@@ -445,9 +447,31 @@ pub fn resolve_rollout(codex_home: &Path, rollout_path: Option<&str>) -> Option<
                 .join(name),
         );
     }
-    tries
-        .into_iter()
-        .find(|p| std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_file()))
+    tries.into_iter().find(|p| no_symlinks_below(codex_home, p))
+}
+
+/// `p` is a regular file and nothing between `root` and it is a symlink.
+fn no_symlinks_below(root: &Path, p: &Path) -> bool {
+    let Ok(rel) = p.strip_prefix(root) else {
+        return false;
+    };
+    let mut at = root.to_path_buf();
+    let n = rel.components().count();
+    for (i, c) in rel.components().enumerate() {
+        at.push(c);
+        let Ok(m) = std::fs::symlink_metadata(&at) else {
+            return false;
+        };
+        let ok = if i + 1 == n {
+            m.file_type().is_file()
+        } else {
+            m.file_type().is_dir()
+        };
+        if !ok {
+            return false;
+        }
+    }
+    n > 0
 }
 
 #[cfg(test)]
@@ -548,5 +572,16 @@ mod tests {
         assert_eq!(resolve_rollout(d.path(), Some("/etc/passwd")), None);
         let up = format!("{}/sessions/../../outside.jsonl", d.path().display());
         assert_eq!(resolve_rollout(d.path(), Some(&up)), None);
+        // A symlinked directory under the roots is never followed.
+        #[cfg(unix)]
+        {
+            let elsewhere = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(elsewhere.path().join("01/15")).unwrap();
+            std::fs::write(elsewhere.path().join("01/15").join(name), b"").unwrap();
+            std::fs::create_dir_all(d.path().join("sessions")).unwrap();
+            std::os::unix::fs::symlink(elsewhere.path(), d.path().join("sessions/2026")).unwrap();
+            std::fs::remove_file(d.path().join("archived_sessions").join(name)).unwrap();
+            assert_eq!(resolve_rollout(d.path(), Some(&gone)), None);
+        }
     }
 }

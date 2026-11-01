@@ -355,25 +355,26 @@ pub fn run(opts: &Options) -> Result<Outcome, Error> {
 
     // The import window. Widening it (or --backfill) re-imports: rows are a projection.
     let stored = store.meta_i64("counted_from_ms")?;
+    // A store that holds less than the default window (one filled when the default was 14 days)
+    // widens once on its own: the installed trigger runs a plain `sync`.
     let wanted = if opts.backfill {
-        Some(0)
+        0
     } else {
-        opts.days
-            .map(|d| day_start(now - d.max(1) * DAY_MS + DAY_MS))
+        let days = opts.days.unwrap_or(DEFAULT_DAYS).max(1);
+        day_start(now - days * DAY_MS + DAY_MS)
     };
     let mut reimported = false;
-    let counted_from = match (stored, wanted) {
-        (None, w) => {
-            let from = w.unwrap_or_else(|| day_start(now - DEFAULT_DAYS * DAY_MS + DAY_MS));
-            store.reset(from)?;
-            from
+    let counted_from = match stored {
+        None => {
+            store.reset(wanted)?;
+            wanted
         }
-        (Some(s), Some(w)) if w < s => {
-            store.reset(w)?;
+        Some(s) if wanted < s => {
+            store.reset(wanted)?;
             reimported = true;
-            w
+            wanted
         }
-        (Some(s), _) => s,
+        Some(s) => s,
     };
 
     if !opts.force && !reimported {
@@ -419,7 +420,7 @@ pub fn run(opts: &Options) -> Result<Outcome, Error> {
         deadline: started + opts.budget / 2,
         chunks_left: opts.chunk_limit.map(std::cell::Cell::new),
     };
-    codex_pass(
+    let codex_read = codex_pass(
         opts,
         &mut store,
         &mut attr,
@@ -525,7 +526,7 @@ pub fn run(opts: &Options) -> Result<Outcome, Error> {
     store.set_meta("last_pending_bytes", &report.pending_bytes.to_string())?;
     store.set_meta("last_pending_files", &report.pending_files.to_string())?;
     for s in Source::ALL {
-        if !pending_sources.contains(&s) {
+        if !pending_sources.contains(&s) && (s != Source::Codex || codex_read) {
             store.mark_success(s.harness(), now)?;
         }
     }
@@ -622,7 +623,8 @@ fn set_codex_status(store: &Store, status: &str, reason: &str) -> rusqlite::Resu
 }
 
 /// Codex threads changed since the last run: each rollout from where the last run stopped (its
-/// tail, once imported), else the thread's `tokens_used` as `total_only`.
+/// tail, once imported), else the thread's `tokens_used` as `total_only`. Returns whether the
+/// thread list could be read.
 fn codex_pass(
     opts: &Options,
     store: &mut Store,
@@ -631,11 +633,11 @@ fn codex_pass(
     limits: &ReadLimits,
     report: &mut Report,
     pending: &mut BTreeSet<Source>,
-) -> Result<(), Error> {
+) -> Result<bool, Error> {
     let now = opts.now_ms;
     let Some(db) = codex::state_db(&opts.codex_home) else {
         set_codex_status(store, "absent", "")?;
-        return Ok(());
+        return Ok(false);
     };
     let watermark = store.meta_i64("codex_watermark_ms")?;
     let since = watermark.map_or(counted_from, |w| (w - CODEX_SLACK_MS).max(counted_from));
@@ -643,11 +645,16 @@ fn codex_pass(
         State::Threads { threads, parents } => (threads, parents),
         State::Absent => {
             set_codex_status(store, "absent", "")?;
-            return Ok(());
+            return Ok(false);
         }
         State::Unsupported(reason) => {
             set_codex_status(store, "unsupported", &reason)?;
-            return Ok(());
+            return Ok(false);
+        }
+        State::Unreadable(reason) => {
+            // Try again next run; what was counted stays.
+            set_codex_status(store, "degraded", &reason)?;
+            return Ok(false);
         }
     };
     report.files_seen += threads.len();
@@ -784,5 +791,5 @@ fn codex_pass(
         if degraded { "degraded" } else { "ok" },
         &reasons.join("; "),
     )?;
-    Ok(())
+    Ok(true)
 }

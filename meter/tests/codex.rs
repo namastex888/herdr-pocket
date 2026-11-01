@@ -18,6 +18,8 @@ const COLUMNS: &str = "id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL, created_
 struct Codex {
     home: PathBuf,
     db: PathBuf,
+    /// Codex keeps its database open in WAL mode while it runs; so do the tests.
+    _live: Connection,
 }
 
 impl Codex {
@@ -31,7 +33,8 @@ impl Codex {
         let db = home.join("state_3.sqlite");
         let c = Connection::open(&db).unwrap();
         c.execute_batch(&format!(
-            "CREATE TABLE threads ({columns});
+            "PRAGMA journal_mode = WAL;
+             CREATE TABLE threads ({columns});
              CREATE INDEX threads_updated ON threads(updated_at_ms);
              CREATE TABLE thread_spawn_edges (parent_thread_id TEXT NOT NULL,
                child_thread_id TEXT NOT NULL PRIMARY KEY, status TEXT NOT NULL);"
@@ -39,7 +42,7 @@ impl Codex {
         .unwrap();
         // An older state database the meter must ignore.
         fs::write(home.join("state_2.sqlite"), b"not a database").unwrap();
-        Codex { home, db }
+        Codex { home, db, _live: c }
     }
 
     fn rollout(&self, id: &str) -> PathBuf {
@@ -403,6 +406,23 @@ fn a_state_database_of_another_shape_is_unsupported_not_zero() {
 }
 
 #[test]
+fn an_unreadable_state_database_is_degraded_and_not_a_success() {
+    let env = Env::new();
+    let home = env.home().join(".codex");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(
+        home.join("state_9.sqlite"),
+        b"this is not a database, but long enough",
+    )
+    .unwrap();
+    let r = env.run(&env.opts());
+    let codex = &r.summary.unwrap()["sources"]["codex"];
+    assert_eq!(codex["status"], "degraded");
+    assert!(codex["reason"].as_str().unwrap().starts_with("cannot "));
+    assert!(codex["last_success"].is_null());
+}
+
+#[test]
 fn no_codex_is_absent() {
     let env = Env::new();
     let r = env.run(&env.opts());
@@ -419,9 +439,14 @@ fn the_state_database_is_left_untouched_and_no_text_is_kept() {
         &[other_line(), tc("2026-01-15T09:10:00Z", 1000, 800, 100, 40)],
     );
     cx.thread("t-1", &f, 1100, "2026-01-15T09:10:00Z");
-    let before = fs::read(&cx.db).unwrap();
+    let wal = cx.db.with_extension("sqlite-wal");
+    let before = (fs::read(&cx.db).unwrap(), fs::read(&wal).unwrap());
     let r = env.run(&env.opts());
-    assert_eq!(fs::read(&cx.db).unwrap(), before);
+    assert_eq!((fs::read(&cx.db).unwrap(), fs::read(&wal).unwrap()), before);
+    assert_eq!(
+        r.summary.as_ref().unwrap()["sources"]["codex"]["status"],
+        "ok"
+    );
     let doc = serde_json::to_string(&r.summary.unwrap()).unwrap();
     let mut db = Vec::new();
     for e in fs::read_dir(env.state()).unwrap() {

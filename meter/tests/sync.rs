@@ -540,6 +540,42 @@ fn the_first_run_imports_30_days_and_backfill_imports_the_rest() {
 }
 
 #[test]
+fn a_store_with_a_shorter_window_widens_once_on_a_plain_sync() {
+    let env = Env::new();
+    let f = env.claude("-work-app/sess-1.jsonl");
+    write_lines(
+        &f,
+        &[
+            claude_line(
+                "msg_old",
+                "req_old",
+                "2025-12-20T10:00:00Z",
+                "model-a",
+                &U2,
+                0,
+            ),
+            claude_line("msg_new", "req_new", TS, "model-a", &U1, 0),
+        ],
+    );
+    // A store filled with a 14-day window, as an older meter did.
+    let mut o = env.opts();
+    o.days = Some(14);
+    env.run(&o);
+    assert_eq!(env.totals()["model-a"], U1.tokens());
+    // The installed trigger runs a plain sync: the store widens to the default window.
+    let r = env.run(&env.opts());
+    assert!(r.reimported);
+    assert_eq!(meter::time::format_day(r.counted_from_ms), "2025-12-17");
+    assert_eq!(env.totals()["model-a"], sum(&[&U1, &U2]));
+    // ... once: a day later, the window has moved on but the store keeps what it has.
+    let mut o = env.opts();
+    o.now_ms += meter::time::DAY_MS;
+    let r = env.run(&o);
+    assert!(!r.reimported);
+    assert_eq!(env.totals()["model-a"], sum(&[&U1, &U2]));
+}
+
+#[test]
 fn a_chunk_commits_its_rows_keys_and_offset_together() {
     use meter::event::{Precision, RollupKey};
     use meter::store::{Attributed, FileState, Health, Store};

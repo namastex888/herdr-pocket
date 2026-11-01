@@ -22,7 +22,8 @@ Codex:
 - The state database is opened read-only (`mode=ro`, busy timeout 2 s) for one indexed query on
   `threads` changed since the last run (`updated_at_ms`, minus 10 minutes of slack), plus the
   spawn edges, then closed. Its columns are checked first; if one the meter reads is missing,
-  Codex shows `unsupported` and nothing from it is counted. Codex's other databases (thread
+  Codex shows `unsupported` and nothing from it is counted; a database that cannot be opened or
+  read this time shows `degraded` and is tried again next run. Codex's other databases (thread
   history, logs, memories) are never opened. A read-only open of a database in WAL mode may still
   create its `-shm` file if Codex is not running; it never writes data.
 - A rollout's `token_count` events carry the thread's running total (`total_token_usage`), with
@@ -84,8 +85,8 @@ meter --version
 widening it re-imports), `--budget-secs N` (default 20), `--no-publish`, `--doc NAME` (default
 `herdr-meter`).
 
-- The first run imports 30 days, what the summary doc shows. A store first filled when the
-  default was 14 days keeps 14 until a sync with `--days 30` widens it.
+- The first run imports 30 days, what the summary doc shows. A store that holds less (one first
+  filled when the default was 14 days) is re-imported once to 30 days by the next plain `sync`.
 - One run per machine: a second `meter sync` while one runs exits 0 at once.
 - A sync within 10 minutes of a complete one does nothing unless `--force`.
 - When the budget runs out, progress so far is committed and the rest waits for the next run. A
