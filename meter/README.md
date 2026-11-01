@@ -71,6 +71,21 @@ per-turn rows are stored, and no $ except omp's reported cost.
   running the same harness in the same cwd. Usually null today.
 - `machine` is herdr-core's core id, or a random id kept in the store when hc is absent.
 
+## Install
+
+Each release carries the meter as `automagik-meter-darwin-arm64`, `-darwin-x86_64`,
+`-linux-x86_64` and `-linux-aarch64` (static), with a `SHA256SUMS` file. The Pocket Link bridge
+([desktop/pocket-link](../desktop/pocket-link/README.md)) installs the right one as
+`~/.local/bin/automagik-meter` on this computer and every connected herdr-core machine, checking
+the hash first, and runs `nice -n 19 automagik-meter sync` ten minutes after each pass. By hand:
+
+```sh
+curl -fLO https://github.com/automagik-dev/automagik-pocket/releases/latest/download/automagik-meter-linux-x86_64
+curl -fLO https://github.com/automagik-dev/automagik-pocket/releases/latest/download/SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS
+install -m 755 automagik-meter-linux-x86_64 ~/.local/bin/automagik-meter
+```
+
 ## Run
 
 ```sh

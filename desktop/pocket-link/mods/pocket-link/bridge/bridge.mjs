@@ -8,6 +8,9 @@
 //   node bridge.mjs start | stop     start the bridge detached; stop it (and its login service)
 //   node bridge.mjs forget <id>      remove a paired phone
 //   node bridge.mjs install|uninstall   start at login (LaunchAgent on macOS, systemd user unit on Linux)
+//   node bridge.mjs meter [machine]  install/update and run the usage meter once, on every machine
+//                                    (or on this computer and that machine)
+//                                    (`serve` does it 10 minutes after each pass; see meter.mjs)
 //
 // State lives in ../.state (hidden, so Herdr doesn't reload the mod when it changes).
 import { Endpoint, EndpointTicket, SecretKey } from '@number0/iroh'
@@ -18,12 +21,13 @@ import { homedir, hostname, platform } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import QRCode from 'qrcode'
+import { startMeter, failing } from './meter.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const STATE = join(HERE, '..', '.state')
 const files = {
   key: join(STATE, 'secret.key'), status: join(STATE, 'status.json'), devices: join(STATE, 'devices.json'),
-  pairing: join(STATE, 'pairing.json'), log: join(STATE, 'bridge.log'),
+  pairing: join(STATE, 'pairing.json'), log: join(STATE, 'bridge.log'), meter: join(STATE, 'meter.json'),
 }
 const SESSION = [...Buffer.from('herdr-pocket/1')]
 const PAIR = [...Buffer.from('herdr-pocket/pair/1')]
@@ -129,6 +133,10 @@ async function session(conn, bi) {
   hc.stdin.end()
 }
 
+// The usage meter on this computer and every connected machine (meter.mjs). Its state is
+// .state/meter.json; the dialog shows only machines that keep failing.
+const meterLoop = (only = null) => startMeter({ hc: hcPath(), read: () => readJson(files.meter, {}), write: s => writeJson(files.meter, s), log, only })
+
 async function serve() {
   const other = readJson(files.status, {})
   if (other.pid && other.pid !== process.pid && alive(other.pid)) { log('serve: already running as', other.pid); process.exit(0) }
@@ -138,7 +146,8 @@ async function serve() {
   publish()
   ep.online().then(() => { publish(); log('serve: online as', ep.id().fmtShort()) }, e => log('serve: no relay yet:', e.message))
   ep.watchAddr(() => publish())
-  const stop = async () => { try { const s = readJson(files.status, {}); if (s.pid === process.pid) unlinkSync(files.status) } catch {}; await ep.close().catch(() => {}); process.exit(0) }
+  const meter = meterLoop()
+  const stop = async () => { meter.stop(); try { const s = readJson(files.status, {}); if (s.pid === process.pid) unlinkSync(files.status) } catch {}; await ep.close().catch(() => {}); process.exit(0) }
   process.on('SIGTERM', stop); process.on('SIGINT', stop)
   setInterval(revoke, 2000).unref()
   for (;;) {
@@ -223,8 +232,10 @@ try {
     const p = readJson(files.pairing, null)
     out({ running: Boolean(s.pid && alive(s.pid)), id: s.id ?? null, name: s.name ?? null, ticket: s.ticket ?? null,
       devices: devices().map(({ id, name, paired, seen }) => ({ id, name, paired, seen })),
-      pairing: p && Date.now() < p.expires ? { expires: p.expires } : null, login: existsSync(loginService().path) })
+      pairing: p && Date.now() < p.expires ? { expires: p.expires } : null, login: existsSync(loginService().path),
+      meter: { failing: failing(readJson(files.meter, {})) } })
   }
+  else if (command === 'meter') { const m = meterLoop(arg ?? null); const s = await m.pass(); m.stop(); out(s) }
   else if (command === 'start') {
     // Without the login service: a detached bridge that lives until stopped or logout.
     const s = readJson(files.status, {})

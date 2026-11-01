@@ -1,0 +1,46 @@
+name: Pocket Link
+
+# The desktop mod's bridge (desktop/pocket-link/): syntax and its dependency-free tests (the
+# usage meter installer and loop), on Linux and macOS. Runs only when the mod changes.
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'desktop/pocket-link/**'
+      - '.github/workflows/pocket-link.yml'
+  pull_request:
+    paths:
+      - 'desktop/pocket-link/**'
+      - '.github/workflows/pocket-link.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: bridge tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: desktop/pocket-link/mods/pocket-link
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax
+        run: node --check bridge/bridge.mjs && node --check bridge/meter.mjs
+      - name: Test
+        run: node --test bridge/meter.test.mjs
