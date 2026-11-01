@@ -33,5 +33,9 @@
         <service android:name=".WatchService" android:exported="false" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Keeps the user's connections to their own computers open so a coding agent that needs them or finishes reaches them as a notification they can reply to." />
         </service>
+        <!-- An update, from GitHub or Play, ends the process: this brings Watch in background back if it was on. -->
+        <receiver android:name=".WatchResumeReceiver" android:exported="false">
+            <intent-filter><action android:name="android.intent.action.MY_PACKAGE_REPLACED" /></intent-filter>
+        </receiver>
     </application>
 </manifest>

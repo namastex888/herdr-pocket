@@ -69,7 +69,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     private val _state = MutableStateFlow(PocketState(nativeDisplay = prefs.getBoolean("native_display", false),
         fontSize = prefs.getInt("font_size", DEFAULT_FONT_SIZE).coerceIn(FONT_SIZES), folded = prefs.getStringSet("folded_machines", null).orEmpty().toSet(),
         alertSounds = prefs.getBoolean("alert_sounds", true), alertBlocked = prefs.getBoolean("alert_blocked", true), alertDone = prefs.getBoolean("alert_done", true),
-        lockAnswers = prefs.getBoolean("lock_answers", false), watch = prefs.getBoolean("watch_background", true),
+        lockAnswers = prefs.getBoolean("lock_answers", false), watch = prefs.getBoolean(WatchResume.PREF_WATCH, true),
         seen = runCatching { JSONArray(prefs.getString("seen_done", "[]")).let { a -> (0 until a.length()).map(a::getString) }.toSet() }.getOrDefault(emptySet()), hosts = runCatching {
         JSONArray(prefs.getString("hosts", "[]")).objects().map(HostProfile::parse)
     }.getOrDefault(emptyList())))
@@ -355,10 +355,16 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         syncWatch()
     }
     @Volatile private var watchText = ""
-    /** Runs [WatchService] while a machine is connected (or coming back), with how many agents need the person. */
-    private fun syncWatch() {
+    @Volatile private var kept: Set<String>? = null
+    /** Runs [WatchService] while a machine is connected (or coming back), with how many agents need the person.
+     *  [canStart]: Android allows starting it now (on screen, or from [resumeWatching]). */
+    private fun syncWatch(canStart: Boolean = foreground) {
         val s = state.value
         val app = getApplication<Application>()
+        // What to reconnect if an update ends the process ([WatchResume]).
+        val active = s.machines.filterValues { it.connected || it.connecting }.keys + retrying
+        val watched = WatchResume.watched(s.watch, s.demo, active, passwordHosts + temporaryPasswords.keys)
+        if (watched != kept) { kept = watched; prefs.edit { putStringSet(WatchResume.PREF, watched) } }
         val machines = s.machines.values.count { it.connected }
         if (!s.watch || s.demo || (machines == 0 && retrying.isEmpty() && s.machines.values.none { it.connecting })) {
             watchText = ""; WatchService.stop(app); return
@@ -367,10 +373,22 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         val text = if (machines == 0) "Reconnecting…" else WatchService.summary(machines, needYou)
         if (text == watchText) return
         watchText = text
-        WatchService.show(app, text, foreground)
+        WatchService.show(app, text, canStart)
+    }
+    /** After an update ended the process: reconnect the machines it was watching and start the watch service, with no
+     *  screen. Called from [WatchResumeReceiver], whose broadcast lets the service start from the background. */
+    fun resumeWatching() {
+        val s = state.value
+        if (s.demo) return
+        val ids = WatchResume.hosts(s.watch, prefs.getStringSet(WatchResume.PREF, null), s.hosts.map { it.id })
+        val hosts = s.hosts.filter { it.id in ids && jobs[it.id]?.isActive != true }
+        if (hosts.isEmpty()) return
+        retrying.addAll(hosts.map { it.id })
+        watchText = ""; syncWatch(canStart = true)
+        hosts.forEach { connect(it, retry = 1) }
     }
     fun setWatch(on: Boolean) {
-        prefs.edit { putBoolean("watch_background", on) }
+        prefs.edit { putBoolean(WatchResume.PREF_WATCH, on) }
         _state.update { it.copy(watch = on) }
         if (!on) { reconnects.values.forEach { it.cancel() }; reconnects.clear(); retrying.clear() }
         watchText = ""; syncWatch()

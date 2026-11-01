@@ -387,8 +387,10 @@ object Updater {
         cancelReady(context)
         if (!Notify.allowed(context)) return
         channel(context)
-        // Android closed the app to replace it, and connections only open when the person asks.
-        val detail = listOf(line, if (pending.optBoolean("watching")) "Open Automagik to reconnect your machines." else "")
+        // Android closed the app to replace it. WatchResumeReceiver brings watched machines back; one connected with a
+        // typed password waits for the person.
+        val reopen = pending.optBoolean("watching") && !WatchResume.wanted(context)
+        val detail = listOf(line, if (reopen) "Open Automagik to reconnect your machines." else "")
             .filter(String::isNotBlank).joinToString("\n")
         val open = PendingIntent.getActivity(context, UPDATED_ID, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val n = NotificationCompat.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_notify).setColor(BrandArgb)
