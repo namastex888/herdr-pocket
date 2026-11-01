@@ -149,7 +149,9 @@ stops opening it, for example after reinstalling, set the assistant again.
   and it installs at once.
 - Android closes the app to update it. A quiet notification in the **Updates** channel then says
   **Updated to X** with the release's first note, and Settings → About shows the same line.
-  Connections don't come back on their own after an update: open the app to reconnect.
+- If **Watch in background** was holding connections, the new version reconnects those machines
+  on its own, whether the update came from GitHub or Google Play. A password connection waits for
+  you.
 - When Android won't install silently, a notification says **Automagik X is ready**, once per
   version. Tap **Install** to open Settings and Android's confirm prompt. This happens on Android
   11 and older, on a phone plan, with the switch off, until Automagik may install apps (the first
@@ -160,7 +162,8 @@ stops opening it, for example after reinstalling, set the assistant again.
 
 - The Pocket Link bridge runs as a LaunchAgent on macOS or a systemd user service on Linux.
 - Connections live in the app; with Watch in background they stay open in a foreground service.
-  After Android stops the service or the phone restarts, open the app and connect again.
+  After an update they come back on their own. After Android stops the service or the phone
+  restarts, open the app and connect again.
 - The SSH command assumes a Unix shell, so Windows hosts don't work.
 - The app reads the desktop's layout. It doesn't edit, rename or delete it, and doesn't run
   desktop mods.
