@@ -31,10 +31,11 @@ Decisions where the pull request gave one.
   - URL scheme `herdr-pocket://pair` and iroh ALPNs `herdr-pocket/1`, `herdr-pocket/pair/1`:
     `IrohLink.kt:34`, `:55-56`. These are a protocol shared with the desktop mod.
   - SSH key comment `herdr-pocket@android`: `Ssh.kt:36`.
-  - Update request User-Agent `HerdrPocket/<version>`: `Updater.kt:115`.
+  - Update request User-Agent `HerdrPocket/<version>`: `Updater.kt:265`.
   - Theme style names `Theme.Herdr`: `android/app/src/main/res/values/styles.xml:3`.
-  - User-facing: Settings says "Graphite colors" (`Screens.kt:183`) and "open Herdr"
-    (`Screens.kt:211`).
+  - The settings text that still said "Graphite colors" and "open Herdr" now names Automagik and
+    its light and dark colours (`Screens.kt:183`, `:211`). The SSH host-key repository JSch can
+    name in its messages is "Automagik verified hosts" (`Ssh.kt:56`).
 
 ## Design
 
