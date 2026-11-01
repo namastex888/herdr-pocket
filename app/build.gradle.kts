@@ -1,12 +1,37 @@
+import java.util.Properties
+
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id("org.jetbrains.kotlin.plugin.compose") }
+
+// The release key. CI passes it in the environment; a maintainer's machine keeps it in ~/.config/herdr-pocket/signing.properties.
+// Without it, builds are debug-signed and can't update, or be updated by, the published releases.
+val signing = Properties().apply {
+    val local = File(System.getProperty("user.home"), ".config/herdr-pocket/signing.properties")
+    if (local.isFile) local.inputStream().use(::load)
+    System.getenv("POCKET_SIGNING_STORE")?.let { setProperty("storeFile", it) }
+    val password = System.getenv("POCKET_SIGNING_PASSWORD") ?: getProperty("passwordFile")?.let { File(it).takeIf(File::isFile)?.readText()?.trim() }
+    password?.let { setProperty("password", it) }
+}
+// Each commit builds a higher version than the one before it: minutes from 2025 to the commit's time, so an installed
+// build always takes the updates published after it. CI and local builds of one commit get the same number.
+val commitMinutes = providers.exec { commandLine("git", "log", "-1", "--format=%ct"); isIgnoreExitValue = true }
+    .standardOutput.asText.map { ((it.trim().toLongOrNull() ?: 1735689660L) - 1735689600L) / 60 }
 android {
     namespace = "dev.herdr.pocket"
     compileSdk = 35
-    defaultConfig { applicationId = "dev.herdr.pocket"; minSdk = 26; targetSdk = 35; versionCode = 3; versionName = "0.2.0"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    defaultConfig { applicationId = "dev.herdr.pocket"; minSdk = 26; targetSdk = 35; versionCode = commitMinutes.get().toInt(); versionName = "0.3.0"; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // iroh ships a 9–14 MB library per ABI: phones, and x86_64 for Intel emulators. 32-bit x86 and MIPS phones are long gone.
-        ndk { abiFilters += setOf("arm64-v8a", "armeabi-v7a", "x86_64") } }
+        ndk { abiFilters += setOf("arm64-v8a", "armeabi-v7a", "x86_64") }
+        // Where installed copies look for updates: latest.json on the newest GitHub release. A fork points this at its own.
+        val updates = providers.gradleProperty("pocket.updateUrl").orElse("https://github.com/namastex888/herdr-pocket/releases/latest/download/latest.json")
+        buildConfigField("String", "UPDATE_URL", "\"${updates.get()}\"") }
+    signingConfigs { if (signing.getProperty("storeFile") != null && signing.getProperty("password") != null) create("pocket") {
+        storeFile = file(signing.getProperty("storeFile")); storePassword = signing.getProperty("password")
+        keyAlias = signing.getProperty("alias", "pocket"); keyPassword = signing.getProperty("password") } }
     buildFeatures { compose = true; buildConfig = true }
-    buildTypes { release { isMinifyEnabled = false } }
+    buildTypes {
+        // Debug builds use the release key too when it's here, so a build from Android Studio and the published ones update each other.
+        debug { signingConfigs.findByName("pocket")?.let { signingConfig = it } }
+        release { isMinifyEnabled = false; signingConfig = signingConfigs.findByName("pocket") ?: signingConfigs.getByName("debug") } }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
     packaging { resources.excludes += setOf("META-INF/versions/9/OSGI-INF/MANIFEST.MF", "META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*",

@@ -28,6 +28,7 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,6 +46,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
@@ -135,6 +137,22 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
     val nearby = (listOfNotNull(Discovery.emulatorHost) + discovered).filter { n -> state.hosts.none { it.host == n.host && it.port == n.port } }
     fun addNearby(n: NearbyHost) { addPrefill = n.prefill(); addHost = true }
     LaunchedEffect(state.message) { state.message?.let { snackbar.showSnackbar(it); vm.dismissMessage() } }
+    // Self-update: offer each new build once, open Android's install prompt, and continue after the install permission screen.
+    val update by Updater.state.collectAsStateWithLifecycle()
+    var offered by rememberSaveable { mutableLongStateOf(0L) }
+    LaunchedEffect(update) {
+        when (val u = update) {
+            is UpdateState.Available -> if (u.release.versionCode != offered) {
+                offered = u.release.versionCode
+                if (snackbar.showSnackbar("Herdr Pocket ${u.release.label} is available", "Update", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed)
+                    activity?.let(Updater::start)
+            }
+            is UpdateState.Confirm -> { runCatching { activity?.startActivity(u.intent) }; Updater.confirming(u.release) }
+            is UpdateState.Failed -> if (state.screen != "settings") snackbar.showSnackbar(u.message)
+            else -> {}
+        }
+    }
+    LifecycleResumeEffect(Unit) { activity?.let(Updater::resume); onPauseOrDispose { } }
     BackHandler(drawer.isOpen || selected != null || state.screen != "overview" || state.space != null) {
         when { drawer.isOpen -> scope.launch { drawer.close() }; selected != null -> vm.backToList(); else -> vm.showAll() }
     }
@@ -196,7 +214,8 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
                             Text("POCKET", color = Muted, fontSize = 9.sp, letterSpacing = 1.sp, modifier = Modifier.padding(7.dp, 4.dp))
                         }
                     }
-                    HorizontalDivider(color = Border)
+                    (update as? UpdateState.Downloading)?.let { LinearProgressIndicator(progress = { it.progress }, Modifier.fillMaxWidth().height(2.dp), color = Accent, trackColor = Border) }
+                        ?: HorizontalDivider(color = Border)
                     if (state.demo) Row(Modifier.fillMaxWidth().background(Accent.copy(alpha = .09f)).padding(start = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("Interface preview · sample data", color = Accent, fontSize = 12.sp, modifier = Modifier.weight(1f))
                         TextButton(onClick = vm::leaveDemo) { Text("Exit", fontSize = 12.sp) }
