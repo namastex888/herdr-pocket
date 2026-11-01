@@ -41,6 +41,10 @@ object Notify {
 
     fun id(ref: TerminalRef) = "${ref.hostId}|${ref.address}".hashCode()
 
+    /** The actions' titles in order: one per choice ("Always" for a "don't ask again" option), then Reply if there's room. */
+    fun titles(choices: List<Prompt.Choice>) =
+        choices.map { if (it.always) "Always" else it.label.take(40) } + if (choices.size < 3) listOf("Reply") else emptyList()
+
     /** [detail]: what it asks or said, and where it runs. [lockScreen]: Reply works without unlocking, and the content shows there. */
     /** [menu]: the options on the agent's screen, which become buttons (see [Prompt.choices]). */
     fun post(context: Context, alert: Alerts.Alert, detail: String, silent: Boolean, lockScreen: Boolean, menu: Prompt.Menu? = null) =
@@ -52,8 +56,11 @@ object Notify {
              choices: List<Prompt.Choice> = emptyList(), options: List<String> = emptyList(), msg: String = "") {
         if (!allowed(context)) return
         // One button per option; each remembers the question and the whole menu, so a stale tap presses nothing.
-        val picks = choices.map { c ->
-            NotificationCompat.Action.Builder(R.drawable.ic_notify, c.label.take(40), PendingIntent.getBroadcast(context, id(ref) * 31 + c.index + 1,
+        // A permission with a "don't ask again" option fills all three: Yes, Always, No, and Reply goes (Android shows at
+        // most three); tapping the notification still opens the agent to type. Always is locked like the others.
+        val names = titles(choices)
+        val picks = choices.mapIndexed { i, c ->
+            NotificationCompat.Action.Builder(R.drawable.ic_notify, names[i], PendingIntent.getBroadcast(context, id(ref) * 31 + c.index + 1,
                 Intent(context, ChoiceReceiver::class.java).putExtra(EXTRA_HOST, ref.hostId).putExtra(EXTRA_ADDRESS, ref.address).putExtra(EXTRA_TITLE, title)
                     .putExtra(EXTRA_KIND, kind).putExtra(EXTRA_DETAIL, detail).putExtra(EXTRA_MSG, msg)
                     .putStringArrayListExtra(EXTRA_OPTIONS, ArrayList(options)).putExtra(EXTRA_INDEX, c.index).putExtra(EXTRA_LABEL, c.label),
@@ -66,7 +73,8 @@ object Notify {
             .addRemoteInput(RemoteInput.Builder(KEY_REPLY).setLabel("Message to the agent").build())
             .setAllowGeneratedReplies(false).setAuthenticationRequired(!lockScreen)
             .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY).build()
-        val text = sent ?: detail
+        // "Always" alone doesn't say what it allows: the text does.
+        val text = sent ?: choices.firstOrNull { it.always }?.let { "$detail\nAlways: ${Prompt.scope(it.label)}" } ?: detail
         val n = NotificationCompat.Builder(context, if (kind == Alerts.BLOCKED) NEEDS_YOU else DONE)
             .setSmallIcon(R.drawable.ic_notify).setColor(BrandArgb)
             .setContentTitle(title).setContentText(text).setStyle(NotificationCompat.BigTextStyle().bigText(text))
