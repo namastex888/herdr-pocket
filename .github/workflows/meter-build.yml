@@ -70,7 +70,7 @@ jobs:
           set -euo pipefail
           file "$BIN"
           if [ "$RUNNER_OS" = Linux ]; then
-            file "$BIN" | grep -q 'statically linked' || { echo "::error::not static"; exit 1; }
+            file "$BIN" | grep -Eq 'statically linked|static-pie linked' || { echo "::error::not static"; exit 1; }
           fi
           if [ "${{ matrix.run }}" = true ]; then "$BIN" --version; fi
 
