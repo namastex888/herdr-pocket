@@ -2,6 +2,8 @@ name: Commit messages
 
 # Every commit a pull request brings is conventional, `type(scope): description`, because the release workflow
 # reads the subjects: chore(release), ci, docs and test commits alone don't cut a release.
+# Only the pull request's own line of commits is checked (--first-parent): history a subtree merge brings in,
+# such as desktop/pocket-link's from its old repository, keeps the subjects it was written with.
 on:
   pull_request:
 
@@ -25,7 +27,7 @@ jobs:
         run: |
           set -euo pipefail
           bad=0
-          for sha in $(git rev-list --no-merges "${BASE}..${HEAD}"); do
+          for sha in $(git rev-list --first-parent --no-merges "${BASE}..${HEAD}"); do
             subject=$(git log -1 --format=%s "${sha}")
             if ! [[ "${subject}" =~ ^(feat|fix|chore|docs|refactor|test|ci|build|perf|style|revert)(\([a-z0-9._/-]+\))?!?:\ .+ ]]; then
               echo "::error ::${sha:0:9} is not conventional: ${subject}"
