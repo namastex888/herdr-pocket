@@ -3,7 +3,7 @@ rfc: "0007"
 title: "Watch in background comes back after a phone restart (RECEIVE_BOOT_COMPLETED)"
 status: Accepted
 created: 2026-11-01
-pr: ""
+pr: "#38"
 ---
 # RFC 0007 — Watch in background comes back after a phone restart
 
@@ -111,8 +111,9 @@ backoff retries it; the service stays on "Reconnecting…" meanwhile, as after a
   declaration.
 - The existing `specialUse` declaration gains a start trigger. #31's `docs/play/listing.md` says
   the service is "only started from the foreground"; that is already untrue since #32 (after an
-  update) and, with this RFC, after a restart. Follow-up for #31: say it starts from the
-  foreground, after an app update, and after a phone restart, each only while watching is on.
+  update) and, with this RFC, after a restart. #31 rewords it for the update; once both are in
+  `dev`, a follow-up adds the restart: it starts from the foreground, after an app update, and
+  after a phone restart, each only while watching is on.
 
 ### Privacy
 

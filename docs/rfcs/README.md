@@ -28,6 +28,6 @@ Proposals for changes that others rely on. How to write one: [RFC 0000](0000-rfc
 | [0003](0003-pocket-link-pairing.md) | Pocket Link: pair with Herdr desktop over iroh, no SSH | Implemented | #4 |
 | [0004](0004-monorepo.md) | One repo: android/ and desktop/pocket-link/ | Implemented | #20 |
 | [0005](0005-usage-meter.md) | Usage meter: token usage per machine as ae/1 rows, a summary doc in herdr-core | Draft | — |
-| [0007](0007-watch-after-reboot.md) | Watch in background comes back after a phone restart (RECEIVE_BOOT_COMPLETED) | Accepted | — |
+| [0007](0007-watch-after-reboot.md) | Watch in background comes back after a phone restart (RECEIVE_BOOT_COMPLETED) | Accepted | #38 |
 
 Back to the [docs home](../_index.md).
