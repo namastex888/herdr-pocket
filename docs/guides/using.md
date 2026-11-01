@@ -139,6 +139,10 @@ stops opening it, for example after reinstalling, set the assistant again.
 
 ## Updates
 
+Installed from **Google Play**, the app is updated by Google Play: it has none of what follows,
+and Settings → About shows no update controls. The rest of this section is the **GitHub build**
+(`automagik.apk` from the GitHub releases).
+
 - The app looks for a new version when it opens (at most every 15 minutes) and every 6 hours while
   it or **Watch in background** runs. **Settings → About → Check for updates** looks now.
 - **Install updates automatically** (Settings → About, on by default): on Android 12 and newer the

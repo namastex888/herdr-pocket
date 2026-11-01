@@ -17,7 +17,9 @@ Short rules for coding agents working in this repo. Humans: the same rules apply
 3. Commit subjects are conventional, `type(scope): description`; CI rejects others. `feat`, `fix`,
    `refactor` and similar cut a release on merge; `docs`, `ci` and `test` don't
    ([releasing](docs/guides/releasing.md)).
-4. Before a pull request: `cd android && ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug`.
+4. Before a pull request, from `android/`, for both flavors (github, play):
+   `./gradlew :app:assembleGithubDebug :app:testGithubDebugUnitTest :app:lintGithubDebug :app:assemblePlayDebug :app:testPlayDebugUnitTest :app:lintPlayDebug`.
+   Updater code goes in `app/src/github` only ([RFC 0006](docs/rfcs/0006-distribution-flavors.md)).
 5. Never commit or print the signing key or its password. Never change the app ID, the signing key
    or the `latest.json` format without an RFC.
 

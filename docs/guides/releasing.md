@@ -35,20 +35,24 @@ workflow**):
    4. Commits `chore(release): v0.(N+1).0`, tags it, and pushes the commit and tag to `dev` in one
       atomic push. If `dev` moved meanwhile, it stops; the run for the newer merge releases both.
 2. **Publish** (job "Publish v…"):
-   1. Builds the release APK from the tag, signed with the release key from the
+   1. Builds the release APK (github flavor, `assembleGithubRelease`) and the Play bundle (play
+      flavor, `bundlePlayRelease`) from the tag, signed with the release key from the
       `POCKET_SIGNING_KEYSTORE` and `POCKET_SIGNING_PASSWORD` secrets. No key, no release.
    2. Checks that the APK's `versionName` matches the tag.
    3. Writes `latest.json` (`versionCode`, `versionName`, `url`, `sha256`, `notes`).
    4. Publishes the GitHub release as **Latest** with `automagik.apk` and `latest.json`. The notes
       list the commit subjects since the previous release and the APK's SHA-256.
+   5. Keeps the Play bundle as a workflow artifact, `automagik-play-<version>-<versionCode>.aab`,
+      for a maintainer to upload to Google Play. It is never a release asset, and the workflow
+      doesn't upload it to Play ([RFC 0006](../rfcs/0006-distribution-flavors.md)).
 
 Installed copies find the new `latest.json` at their next launch.
 
 **Releases that don't change the app.** When nothing under `android/` changed since the previous
-release (a Pocket Link or meter change), Publish builds no APK. It copies the previous release's
-`automagik.apk` and `latest.json` unchanged, after checking that the APK matches the `sha256` in
-`latest.json`. Phones see the same version and don't update. The meter binaries and `SHA256SUMS`
-still ship with the new tag, and the notes say the app is unchanged.
+release (a Pocket Link or meter change), Publish builds no APK and no Play bundle. It copies the
+previous release's `automagik.apk` and `latest.json` unchanged, after checking that the APK
+matches the `sha256` in `latest.json`. Phones see the same version and don't update. The meter
+binaries and `SHA256SUMS` still ship with the new tag, and the notes say the app is unchanged.
 
 ## 3. Check a release
 
