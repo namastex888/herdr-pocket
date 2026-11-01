@@ -50,7 +50,7 @@ data class PocketState(
     /** Settings > Alerts, phone-local like the desktop's settings.json `sounds`. */
     val alertSounds: Boolean = true, val alertBlocked: Boolean = true, val alertDone: Boolean = true,
     /** Notifications show their content on the lock screen, and Reply works there without unlocking. */
-    val lockAnswers: Boolean = true,
+    val lockAnswers: Boolean = false,
     /** Keep connections open in the background ([WatchService]) so alerts arrive as notifications. */
     val watch: Boolean = true,
 )
@@ -65,7 +65,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     private val _state = MutableStateFlow(PocketState(nativeDisplay = prefs.getBoolean("native_display", false),
         fontSize = prefs.getInt("font_size", DEFAULT_FONT_SIZE).coerceIn(FONT_SIZES), folded = prefs.getStringSet("folded_machines", null).orEmpty().toSet(),
         alertSounds = prefs.getBoolean("alert_sounds", true), alertBlocked = prefs.getBoolean("alert_blocked", true), alertDone = prefs.getBoolean("alert_done", true),
-        lockAnswers = prefs.getBoolean("lock_answers", true), watch = prefs.getBoolean("watch_background", true),
+        lockAnswers = prefs.getBoolean("lock_answers", false), watch = prefs.getBoolean("watch_background", true),
         seen = runCatching { JSONArray(prefs.getString("seen_done", "[]")).let { a -> (0 until a.length()).map(a::getString) }.toSet() }.getOrDefault(emptySet()), hosts = runCatching {
         JSONArray(prefs.getString("hosts", "[]")).objects().map(HostProfile::parse)
     }.getOrDefault(emptyList())))
