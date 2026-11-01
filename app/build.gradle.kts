@@ -22,7 +22,7 @@ android {
         // iroh ships a 9–14 MB library per ABI: phones, and x86_64 for Intel emulators. 32-bit x86 and MIPS phones are long gone.
         ndk { abiFilters += setOf("arm64-v8a", "armeabi-v7a", "x86_64") }
         // Where installed copies look for updates: latest.json on the newest GitHub release. A fork points this at its own.
-        val updates = providers.gradleProperty("pocket.updateUrl").orElse("https://github.com/namastex888/herdr-pocket/releases/latest/download/latest.json")
+        val updates = providers.gradleProperty("pocket.updateUrl").orElse("https://github.com/automagik-dev/automagik-pocket/releases/latest/download/latest.json")
         buildConfigField("String", "UPDATE_URL", "\"${updates.get()}\"") }
     signingConfigs { if (signing.getProperty("storeFile") != null && signing.getProperty("password") != null) create("pocket") {
         storeFile = file(signing.getProperty("storeFile")); storePassword = signing.getProperty("password")

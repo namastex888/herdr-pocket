@@ -1,6 +1,6 @@
-# Herdr Pocket
+# Automagik Pocket
 
-A native Android companion for **herdr-core**, styled after the Herdr desktop app. Kotlin and Jetpack Compose, with the desktop's Graphite palette, status colors, spaces and tabs. The sidebar becomes a hamburger drawer. The selected terminal gets the phone's width; desktop splits become a pane picker.
+A native Android companion for **herdr-core**, laid out like the Herdr desktop app and coloured with the Automagik Stage design system (light and dark, following the phone). Kotlin and Jetpack Compose, with the desktop's status colors, spaces and tabs. The sidebar becomes a hamburger drawer. The selected terminal gets the phone's width; desktop splits become a pane picker.
 
 This is an independent prototype, not an official Herdr release.
 
@@ -18,7 +18,7 @@ This is an independent prototype, not an official Herdr release.
 - Android notifications when you aren't in the app: **Needs you** and **Done**, one per agent, with **Reply** (typed into the agent, and the outcome shows in the notification) and a tap that opens the agent. A notification goes away once the agent is answered elsewhere, starts working again, or you open it. **Answer from the lock screen** (on by default) shows what the agent asks on the lock screen and lets Reply work there without unlocking; turn it off to require unlocking.
 - **Answer from the notification:** when an agent asks for permission, its notification has **Yes** and **No** (never "always allow" or a mode change); when it asks a question, up to three of its answers. A button re-reads the agent first and presses the keys only if the same question and options are still on its screen; otherwise it says so and sends nothing.
 - **Watch in background** (on by default): while a machine is connected, a foreground service keeps the connections open with a "Watching N machines" notification; **Stop** there disconnects. A dropped connection comes back on its own (Pocket Link and key-based SSH; a password connection waits for you). In the background the app reads changes less often and skips git checks.
-- **Side button assistant:** in **Settings → Alerts → Side button assistant**, make Herdr Pocket the phone's digital assistant. Holding the side button (or the assistant gesture) then opens a panel over any screen, the lock screen included: the agents that need you, then finished ones, and a message box you can type or speak into. **Answer from the lock screen** off makes it ask to unlock first. Android may clear the assistant choice when the app is reinstalled; set it again if the side button stops opening Herdr.
+- **Side button assistant:** in **Settings → Alerts → Side button assistant**, make Automagik the phone's digital assistant. Holding the side button (or the assistant gesture) then opens a panel over any screen, the lock screen included: the agents that need you, then finished ones, and a message box you can type or speak into. **Answer from the lock screen** off makes it ask to unlock first. Android may clear the assistant choice when the app is reinstalled; set it again if the side button stops opening Herdr.
 - If a connection drops, the terminal and agent list show a **Reconnect** action; pull down on the agent list to refresh or retry.
 - Send a composed message through `terminal.send`, retaining the draft when a send is not confirmed.
 - Start a shell or command. From an existing space it creates a new tab visible in the desktop app through `herdr.space` / `herdr.tab` labels.
@@ -39,7 +39,7 @@ The phone and the desktop dial each other by public key over [iroh](https://iroh
 
 1. Install and run herdr-core on the host, or open Herdr desktop. `hc server status` should work. This client speaks protocol generation 1.
 2. Make SSH reachable from the phone, using your local network or Tailscale.
-3. Open **Herdr Pocket → Settings** and copy the public key. Add it as a line to the host user's `~/.ssh/authorized_keys`. Alternatively use SSH password authentication: the app asks for the password when the host rejects the key, and doesn't save it.
+3. Open **Automagik → Settings** and copy the public key. Add it as a line to the host user's `~/.ssh/authorized_keys`. Alternatively use SSH password authentication: the app asks for the password when the host rejects the key, and doesn't save it.
 4. Tap **Connect a machine** (or **Machines → Add machine**), enter the hostname, SSH user and port, and the core session name (`default` unless you chose another). Tap **Save and connect**.
 5. Compare the fingerprint shown with your host's SSH public-key fingerprint before trusting it. For an Ed25519 SSH server key, run `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the host.
 6. Open the hamburger drawer to choose a space, or open an agent from the Cockpit: what needs you first, then what finished.
@@ -63,7 +63,7 @@ Install `app/build/outputs/apk/debug/app-debug.apk`. GitHub Actions (`.github/wo
 
 ### Install and update
 
-Every push to `main` publishes a release-signed build on the [Releases](https://github.com/namastex888/herdr-pocket/releases/latest) page. Install `automagik.apk` from there once. (Builds before the Automagik rename used the app ID `dev.herdr.pocket`; that copy cannot update to this one, so uninstall it and install `automagik.apk`.) After that, the app checks for a newer build when it opens and offers it; **Settings → About → Check for updates** checks on demand. Android asks once to allow Automagik to install apps. On Android 12 and newer, updates then install without another prompt; older versions show Android's "Update this app?" confirmation. The app closes while it updates; open it again to continue.
+Every push to `main` publishes a release-signed build on the [Releases](https://github.com/automagik-dev/automagik-pocket/releases/latest) page. Install `automagik.apk` from there once. (Builds before the Automagik rename used the app ID `dev.herdr.pocket`; that copy cannot update to this one, so uninstall it and install `automagik.apk`.) After that, the app checks for a newer build when it opens and offers it; **Settings → About → Check for updates** checks on demand. Android asks once to allow Automagik to install apps. On Android 12 and newer, updates then install without another prompt; older versions show Android's "Update this app?" confirmation. The app closes while it updates; open it again to continue.
 
 Each release carries `latest.json` (version code, APK URL and SHA-256). The app installs only an APK whose hash matches, and Android installs it only if it's signed with the same key as the installed copy. A copy built with a different key (a pull request artifact, or a debug build from another machine) can't update in place: uninstall it once, then install the release.
 
@@ -99,12 +99,12 @@ The terminal assets are already bundled; Node is not needed for an Android build
 - `CoreClient.kt`: framed JSON-RPC, event subscription and terminal channels with byte-credit flow control.
 - `Ssh.kt`: Ed25519 identity, host-key pinning, SSH transport.
 - `PocketViewModel.kt`: connections, inventory, selection, terminal lifecycle and ordered input.
-- `MainActivity.kt`, `Screens.kt`: native Compose UI and Graphite theme.
+- `MainActivity.kt`, `Screens.kt`: native Compose UI. `Theme.kt`: Automagik Stage colours, light and dark.
 - `TerminalScreen.kt`, `assets/terminal/`: offline terminal surface and native key/message controls.
 - `KeyInput.kt`, `TerminalModes.kt`: key-row modifiers, cursor-key and paste encoding, and the terminal modes they depend on.
 
 ## Attribution
 
-Graphite color values and the Herdr mark come from [herdrdev/herdr-app](https://github.com/herdrdev/herdr-app), Apache-2.0. The wire format follows [herdr-core's API](https://github.com/herdrdev/herdr-core/tree/master/schema). [juanibiapina/herdr-mobile](https://github.com/juanibiapina/herdr-mobile) was consulted as a protocol/SSH reference; this application's native UI and Kotlin protocol implementation were written for this project.
+Herdr desktop's program table and sidebar rules come from [herdrdev/herdr-app](https://github.com/herdrdev/herdr-app), Apache-2.0. The wire format follows [herdr-core's API](https://github.com/herdrdev/herdr-core/tree/master/schema). [juanibiapina/herdr-mobile](https://github.com/juanibiapina/herdr-mobile) was consulted as a protocol/SSH reference; this application's native UI and Kotlin protocol implementation were written for this project.
 
 See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Project code is Apache-2.0; the bundled terminal has its own MIT license.
