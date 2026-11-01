@@ -44,6 +44,12 @@ workflow**):
 
 Installed copies find the new `latest.json` at their next launch.
 
+**Releases that don't change the app.** When nothing under `android/` changed since the previous
+release (a Pocket Link or meter change), Publish builds no APK. It copies the previous release's
+`automagik.apk` and `latest.json` unchanged, after checking that the APK matches the `sha256` in
+`latest.json`. Phones see the same version and don't update. The meter binaries and `SHA256SUMS`
+still ship with the new tag, and the notes say the app is unchanged.
+
 ## 3. Check a release
 
 1. `gh release view -R automagik-dev/automagik-pocket` shows the latest tag, its assets and notes.
