@@ -24,10 +24,10 @@ answer agents without unlocking.
 
 - Default off: `android/app/src/main/java/ai/namastex/automagik/PocketViewModel.kt:53`, `:68`
   (pref `lock_answers`).
-- Off means: notifications are private on the lock screen (`Notify.kt:75`), and Reply and the
-  option buttons ask to unlock (`Notify.kt:60`, `:67`). The side-button panel asks to unlock first
-  (`AssistActivity.kt:56`). Fallbacks when the app state is missing are off too (`Notify.kt:110`,
-  `:132`).
+- Off means: notifications are private on the lock screen (`Notify.kt:83`), and Reply and the
+  option buttons ask to unlock (`Notify.kt:67`, `:74`). The side-button panel asks to unlock first
+  (`AssistActivity.kt:56`). Fallbacks when the app state is missing are off too (`Notify.kt:118`,
+  `:140`).
 - Setting text: `Screens.kt:175`.
 - [SECURITY.md](../../SECURITY.md) "Lock screen".
 

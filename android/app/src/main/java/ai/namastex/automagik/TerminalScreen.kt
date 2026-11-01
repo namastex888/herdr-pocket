@@ -195,7 +195,7 @@ import kotlin.math.roundToInt
                 modifier = Modifier.heightIn(min = 44.dp),
                 colors = if (i == 0) ButtonDefaults.buttonColors(containerColor = Accent, contentColor = OnAccent)
                     else ButtonDefaults.buttonColors(containerColor = Raised, contentColor = Ink)) {
-                Text("${choice.index + 1}. ${choice.label}", fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                Text("${choice.index + 1}. ${choice.button}", fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.widthIn(max = 260.dp))
             }
         }

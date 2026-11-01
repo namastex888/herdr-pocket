@@ -111,10 +111,13 @@ What the numbers mean:
 - Tap one to open the agent. It goes away once the agent is answered elsewhere, starts working
   again, or you open it.
 - **Reply** types into the agent; the result shows in the notification.
-- When an agent asks for permission, the notification has **Yes** and **No**, never "always allow"
-  or a mode change. When it asks a question, up to three of its answers. A button re-reads the
-  agent first and presses keys only if the same question is still on screen; otherwise it says so
-  and sends nothing.
+- When an agent asks for permission, the notification has **Yes** and **No**, and **Always** between
+  them when the prompt offers "don't ask again" (Claude Code, Codex). The text says what Always
+  covers. With Always there, Reply makes room: tap the notification to type. Never a mode change
+  such as auto mode or "allow all edits". When it asks a question, up to three of its answers. A
+  button re-reads the agent first and presses keys only if the same question is still on screen;
+  otherwise it says so and sends nothing.
+- Above the terminal, the same permission shows **Yes**, **Always allow** and **No**.
 - **Settings → Alerts:** sounds, Needs you and Done on or off, and **Answer from the lock screen**
   (off by default; see [privacy](../privacy.md)).
 
