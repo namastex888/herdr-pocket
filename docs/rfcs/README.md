@@ -22,7 +22,7 @@ Proposals for changes that others rely on. How to write one: [RFC 0000](0000-rfc
 
 | RFC | Title | Status | PR |
 |---|---|---|---|
-| [0000](0000-rfc-process.md) | How this repo proposes and records changes | Draft | — |
+| [0000](0000-rfc-process.md) | How this repo proposes and records changes | Draft | #21 |
 | [0001](0001-identity.md) | Identity: Automagik name and colours, app ID, repo home | Implemented | #14, #15, #16 |
 | [0002](0002-release-and-update-channel.md) | Release and update channel: v0.N.0 per merge to dev, latest.json | Implemented | #6, #18 |
 | [0003](0003-pocket-link-pairing.md) | Pocket Link: pair with Herdr desktop over iroh, no SSH | Implemented | #4 |

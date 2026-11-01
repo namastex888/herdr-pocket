@@ -3,7 +3,7 @@ rfc: "0000"
 title: "How this repo proposes and records changes"
 status: Draft
 created: 2026-11-01
-pr: ""
+pr: "#21"
 ---
 # RFC 0000 — How this repo proposes and records changes
 
@@ -116,8 +116,8 @@ Related.
 
 - Owner, 2026-11-01: this repo keeps its documentation as a Brain-style vault in `docs/`, with
   RFCs, decision notes, guides and a privacy page; the README is rewritten for Android users first.
-  (From the request for this change.) The process text above is still a Draft until the owner
-  accepts it; see open question 1.
+  (Recorded in PR #21, which the owner asked for as "Brain-style full".) The process text above
+  is still a Draft until the owner accepts it; see open question 1.
 
 ## Alternatives considered
 

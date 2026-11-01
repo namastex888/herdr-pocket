@@ -34,7 +34,7 @@ Everything the [README](../../README.md) keeps short. Install and first connecti
 - The hamburger drawer is Herdr desktop's sidebar: spaces, their agents, git branch tails and
   nested worktrees, with the desktop's own program icons.
 - Space names, tab order and splits come from the desktop's `herdr-app` document, including
-  machines that a core forwards. A desktop split becomes a pane picker.
+  machines that a core forwards.
 - Pull down on the list to refresh or retry. A dropped connection shows **Reconnect**.
 - Tap **+** (**New terminal**) in the top bar to start a shell or a command. From a space, it opens
   as a new tab that the desktop shows too.
