@@ -115,7 +115,7 @@ Before the bridge can run, the dialog shows one of two other screens in place of
   - `devices.json`
   - `pairing.json`
   - `bridge.log`
-- **The phone side:** [herdr-pocket](https://github.com/namastex888/herdr-pocket), with `computer.iroh:iroh-android:1.2.0`. It opens the `herdr-pocket://pair` link from a scan, a paste or a tapped link, asks before pairing, and keeps its own key in no-backup storage.
+- **The phone side:** [automagik-pocket](https://github.com/automagik-dev/automagik-pocket), with `computer.iroh:iroh-android:1.2.0`. It opens the `herdr-pocket://pair` link from a scan, a paste or a tapped link, asks before pairing, and keeps its own key in no-backup storage.
 - **What it touches on the computer:**
   - **Network:** iroh's n0 preset. It keeps a connection to n0's public relays and publishes the bridge's public key and current addresses to n0's address lookup, so phones find it after an IP change. Phones connect in over QUIC/UDP.
   - **Programs:** `node`, `npm` (setup only), `hc connect`, `launchctl` or `systemctl --user`, and `sh` (to find `hc` and run setup).

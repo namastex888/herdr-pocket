@@ -1,7 +1,7 @@
 # Pocket Link for Herdr
 
 Pair your phone with Herdr desktop like a TV pairs with a streaming account:
-press **Pair a phone**, scan the code with [Herdr Pocket](https://github.com/namastex888/herdr-pocket),
+press **Pair a phone**, scan the code with [Automagik Pocket](https://github.com/automagik-dev/automagik-pocket),
 done. Your agents on your phone from anywhere, with no SSH, no password and no port to open.
 
 ![Pocket Link](preview.png)
