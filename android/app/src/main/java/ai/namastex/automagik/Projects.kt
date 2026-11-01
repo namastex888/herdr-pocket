@@ -3,11 +3,11 @@ package ai.namastex.automagik
 /**
  * Projects and tasks, read off what the phone already knows. A project is a git repository: spaces whose folder is in
  * the same repository (by origin remote, else by shared git dir) roll up into one, like a squad's several spaces. A task
- * is a branch; work on a trunk (main, master, dev) or with no branch is the project's untasked bucket. Agents and their
+ * is a branch; work on a trunk (main, master, dev, develop, trunk, HEAD) or with no branch is the project's untasked bucket. Agents and their
  * status come from [Cockpit], so the counts here match the Today tab.
  */
 object Projects {
-    private val TRUNKS = setOf("main", "master", "dev")
+    private val TRUNKS = setOf("main", "master", "dev", "develop", "trunk", "HEAD")
     /** The task board's order, most urgent first. */
     val BOARD = listOf(Cockpit.BLOCKED, Cockpit.WORKING, Cockpit.DONE, Cockpit.IDLE)
     fun urgency(rank: Int) = BOARD.indexOf(rank).let { if (it < 0) BOARD.size else it }
