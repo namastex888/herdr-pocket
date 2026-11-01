@@ -146,14 +146,37 @@ class SpendTest {
         assertEquals(2.0, view(a, again).project(app, D1)!!.usd!!, 1e-9)
     }
 
-    @Test fun cutTasksMakeTaskFiguresUnknown() {
-        val cut = report("g9", v2("core-a", listOf(project("github.com/example/app", t(2.0), t(2.0), t(2.0))),
-            listOf(task("github.com/example/app", "feat/login", 1, t(1.0), t(1.0), t(1.0)))) {
-            it.put("tasks_other", JSONObject().put("count", 3).put("d30", t(4.0))).put("truncated", JSONArray().put("tasks"))
-        })
-        val v = view(cut)
+    /** A busy machine: every project kept, tasks cut to fit (the meter's "tasks: kept N of M"). */
+    private fun busy(machine: String, projectTasks: Int, usdPerTask: Double?, vararg branches: String) = report(machine, v2(machine,
+        listOf(project("github.com/example/app", t(2.0), t(2.0), t(9.0)).put("tasks", projectTasks).apply { usdPerTask?.let { put("usd_per_task", it) } }),
+        branches.map { task("github.com/example/app", it, 1, t(1.0), t(1.0), t(1.0)) }) {
+        it.put("tasks_other", JSONObject().put("count", 40).put("d30", t(4.0))).put("truncated", JSONArray().put("tasks: kept 150 of 190"))
+    })
+
+    @Test fun cutTasksElsewhereLeaveAWholeProjectExact() {
+        // Tasks were cut, but this project's two tasks both stayed: its figures are whole.
+        val v = view(busy("g9", 2, 1.0, "feat/login", "fix/crash"))
+        assertEquals(2, v.taskCount(app, D1))
+        assertEquals("$1.00", Spend.money(v.costPerTask(app, D1)))
+        assertEquals("$1.00", Spend.money(v.task(app, "feat/login", D1)!!.sum))
+    }
+
+    @Test fun cutTasksFallBackToTheMetersOwnFigures() {
+        // One of three tasks kept: the 24 h count is unknown, but the meter's own 30-day count and $ per task hold.
+        val v = view(busy("g9", 3, 2.5, "feat/login"))
         assertNull(v.taskCount(app, D1)); assertNull(v.costPerTask(app, D1))
-        assertEquals("≥ $1.00", Spend.money(v.task(app, "feat/login", D1)!!.sum))
+        assertEquals(3, v.taskCount(app, D30))
+        assertEquals("$2.50", Spend.money(v.costPerTask(app, D30)))
+        // The kept task is exact on its machine.
+        assertEquals("$1.00", Spend.money(v.task(app, "feat/login", D1)!!.sum))
+        // Two machines with the project: their counts can't be added (a branch may be on both), so "—".
+        val two = view(busy("g9", 3, 2.5, "feat/login"), b)
+        assertNull(two.taskCount(app, D30)); assertEquals("—", Spend.money(two.costPerTask(app, D30)))
+        // feat/login is kept on both machines, so its merged sum is exact.
+        assertEquals("$4.00", Spend.money(two.task(app, "feat/login", D1)!!.sum))
+    }
+
+    @Test fun cutProjectsAreLowerBounds() {
         // Cut projects make every project a lower bound.
         val other = report("g9", v2("core-a", listOf(project("github.com/example/app", t(2.0), t(2.0), t(2.0)))) {
             it.put("projects_other", JSONObject().put("count", 2).put("tasks", 0).put("d30", t(1.0)))
@@ -163,10 +186,15 @@ class SpendTest {
     }
 
     @Test fun meterStartedInsideTheWindowIsALowerBound() {
-        val young = report("g9", v2("core-a", listOf(project("github.com/example/app", t(2.0), t(2.0), t(2.0))), countedDays = 10))
+        val young = report("g9", v2("core-a", listOf(project("github.com/example/app", t(2.0), t(2.0), t(2.0))), countedDays = 10,
+            tasks = listOf(task("github.com/example/app", "feat/login", 1, t(1.0), t(1.0), t(1.0)))))
         val v = view(young)
         assertEquals("$2.00", Spend.money(v.project(app, D7)))
         assertEquals("≥ $2.00", Spend.money(v.project(app, D30)))
+        // A meter that started 10 days ago still counts its tasks; their 30-day $ are lower bounds.
+        assertEquals(1, v.taskCount(app, D30))
+        assertEquals("≥ $1.00", Spend.money(v.costPerTask(app, D30)))
+        assertEquals("$1.00", Spend.money(v.costPerTask(app, D7)))
     }
 
     @Test fun todayIsLocalMidnightFromTheHourlySeries() {
