@@ -107,7 +107,7 @@ object Notify {
             val kind = intent.getStringExtra(EXTRA_KIND) ?: Alerts.BLOCKED
             val detail = intent.getStringExtra(EXTRA_DETAIL).orEmpty()
             fun show(outcome: String) = post(context, ref, kind, title, detail, silent = true,
-                lockScreen = PocketViewModel.current?.state?.value?.lockAnswers ?: true, sent = outcome)
+                lockScreen = PocketViewModel.current?.state?.value?.lockAnswers ?: false, sent = outcome)
             val vm = PocketViewModel.current ?: run { show("Not sent: open Automagik and connect first."); return }
             val pending = goAsync()
             scope.launch {
@@ -129,7 +129,7 @@ object Notify {
             val kind = intent.getStringExtra(EXTRA_KIND) ?: Alerts.BLOCKED
             val detail = intent.getStringExtra(EXTRA_DETAIL).orEmpty()
             fun show(outcome: String) = post(context, ref, kind, title, detail, silent = true,
-                lockScreen = PocketViewModel.current?.state?.value?.lockAnswers ?: true, sent = outcome)
+                lockScreen = PocketViewModel.current?.state?.value?.lockAnswers ?: false, sent = outcome)
             if (text.isBlank()) return
             val pending = goAsync()
             val vm = PocketViewModel.current

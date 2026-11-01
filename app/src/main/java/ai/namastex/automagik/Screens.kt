@@ -172,7 +172,7 @@ fun NearbyHost.prefill() = HostProfile("", name, host, "", port)
         AlertRow("Done", "When an agent finishes a turn while you aren’t looking at it.", state.alertDone) { vm.setAlerts(done = it) }
         AlertRow("Watch in background", "Keep your machines connected when you leave the app, so alerts still arrive. Android shows a “Watching” notification meanwhile.", state.watch) { vm.setWatch(it) }
         Spacer(Modifier.height(8.dp)); AssistantRow(); Spacer(Modifier.height(8.dp))
-        AlertRow("Answer from the lock screen", "Notifications show what the agent asks on the lock screen, and Reply works there without unlocking.", state.lockAnswers) { vm.setLockAnswers(it) }
+        AlertRow("Answer from the lock screen", "Notifications show what the agent asks on the lock screen, and Reply and Yes work there without unlocking. Anyone holding your locked phone could answer, so it starts off.", state.lockAnswers) { vm.setLockAnswers(it) }
         Spacer(Modifier.height(4.dp))
         Text("Alerts are Android notifications, in the app too: tap one to open its agent, or answer from it. The agent on screen only sounds when it needs you. They come while Automagik is connected.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
         Spacer(Modifier.height(34.dp)); HorizontalDivider(color = Border); Spacer(Modifier.height(26.dp))
