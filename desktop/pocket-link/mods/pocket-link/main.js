@@ -304,6 +304,9 @@ export default class PocketLink extends View {
       .child(div().pt(6).child(this.note(t, "Your agents on your phone, from anywhere. A phone pairs once with a code from this screen: no SSH, no password, no port to open.")))
       .children(body)
       .when(Boolean(this.error), (el) => el.child(div().pt(10).text_size(12).text_color(t.blocked).child(String(this.error))))
+      // The usage meter the bridge keeps running on each machine: shown only when it keeps failing.
+      .children((s?.meter?.failing ?? []).map((f) =>
+        div().pt(10).text_size(12).text_color(t.blocked).child(`Usage meter on ${f.machine}: ${f.error ?? "failing"}`)))
       .child(
         div()
           .pt(16)
