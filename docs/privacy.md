@@ -29,6 +29,7 @@ Effective 2026-11-01. Applies to the Android app **Automagik Pocket** (app ID
 | SSH password | Sent to that machine when it asks; **never saved** | To log in when the key is refused |
 | The phone's make and model (for example "Pixel 8") | Sent once to the desktop you pair with | So the desktop can name the paired phone |
 | Folder git status, origin remote URL and Herdr desktop program icons | Read from your machine; the git answers stay in memory, icons cached on the phone | To draw the spaces tree like the desktop, and to group spaces into projects and branches into tasks |
+| Usage meter summary: token counts and estimated $ per repository, branch, model and hour (the `herdr-meter` document, if you run the meter) | Read from your own machines and kept in memory; never written, never sent anywhere else | To show spend on Today, Projects and Tasks |
 | Update check (app version in the request) | GitHub | To offer a newer release |
 
 Nothing else is collected. We, the developers, receive none of this data.
