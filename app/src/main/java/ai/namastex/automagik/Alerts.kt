@@ -6,7 +6,7 @@ import android.media.RingtoneManager
 
 /**
  * Herdr desktop's alerts (Settings > Alerts, settings.json `sounds`): when an agent needs the person, or finishes while
- * they aren't looking at it, it plays a sound and, unless they're looking, shows a toast that opens it.
+ * they aren't looking at it, it plays a sound and, unless they're looking, posts an Android notification that opens it.
  */
 object Alerts {
     const val BLOCKED = "blocked"
@@ -59,7 +59,7 @@ object Alerts {
         }
     }
 
-    /** Needs you sounds even when the person is looking; Done only when they aren't. The toast shows only when they aren't. */
+    /** Needs you sounds even when the person is looking; Done only when they aren't. */
     fun sounds(kind: String, looking: Boolean) = kind == BLOCKED || !looking
 
     fun play(context: Context) {

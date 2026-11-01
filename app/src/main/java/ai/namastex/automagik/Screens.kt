@@ -174,7 +174,7 @@ fun NearbyHost.prefill() = HostProfile("", name, host, "", port)
         Spacer(Modifier.height(8.dp)); AssistantRow(); Spacer(Modifier.height(8.dp))
         AlertRow("Answer from the lock screen", "Notifications show what the agent asks on the lock screen, and Reply works there without unlocking.", state.lockAnswers) { vm.setLockAnswers(it) }
         Spacer(Modifier.height(4.dp))
-        Text("In the app, an alert is a sound and a toast; tap Open to go to its agent. Away from it, alerts are Android notifications you can reply to. They come while Automagik is connected.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
+        Text("Alerts are Android notifications, in the app too: tap one to open its agent, or answer from it. The agent on screen only sounds when it needs you. They come while Automagik is connected.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
         Spacer(Modifier.height(34.dp)); HorizontalDivider(color = Border); Spacer(Modifier.height(26.dp))
         SmallLabel("About"); Spacer(Modifier.height(15.dp))
         Row(verticalAlignment = Alignment.CenterVertically) { Brand(36); Spacer(Modifier.width(12.dp)); Column { Text("Automagik", fontWeight = FontWeight.SemiBold); Text("${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · Android companion", color = Muted, fontSize = 12.sp) } }

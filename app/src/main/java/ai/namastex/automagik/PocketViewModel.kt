@@ -53,8 +53,6 @@ data class PocketState(
     val lockAnswers: Boolean = true,
     /** Keep connections open in the background ([WatchService]) so alerts arrive as notifications. */
     val watch: Boolean = true,
-    /** An agent that needs the person or finished, for the toast that opens it. */
-    val alert: Alerts.Alert? = null
 )
 const val DEFAULT_FONT_SIZE = 13
 private val RECONNECT_DELAYS = listOf(2_000L, 5_000L, 15_000L, 30_000L, 60_000L)
@@ -373,14 +371,14 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         val wanted = found.filter { if (it.kind == Alerts.BLOCKED) s.alertBlocked else s.alertDone }
         if (wanted.isEmpty() || s.demo) return
         val app = getApplication<Application>()
-        // Away from the app, Android notifications carry the alert and their channel's sound.
-        if (!foreground && Notify.allowed(app)) {
-            wanted.forEach { a -> Notify.post(app, a, detail(a), silent = !s.alertSounds, lockScreen = s.lockAnswers, menu = menu(a, client)) }
-            return
-        }
         fun looking(a: Alerts.Alert) = foreground && s.selected == a.ref
-        if (s.alertSounds && wanted.any { Alerts.sounds(it.kind, looking(it)) }) Alerts.play(app)
-        if (foreground) wanted.filterNot(::looking).maxByOrNull { if (it.kind == Alerts.BLOCKED) 1 else 0 }?.let { a -> _state.update { it.copy(alert = a) } }
+        // An agent the person isn't looking at alerts as an Android notification, in the app too: its channel plays the
+        // sound, Needs you pops up over the screen, and a tap opens the agent. There is no in-app toast.
+        val notify = Notify.allowed(app)
+        if (notify) wanted.filterNot(::looking).forEach { a -> Notify.post(app, a, detail(a), silent = !s.alertSounds, lockScreen = s.lockAnswers, menu = menu(a, client)) }
+        // What no notification covers: the agent on screen asking (Needs you sounds while looking), or notifications off.
+        val unheard = if (notify) wanted.filter(::looking) else wanted
+        if (s.alertSounds && unheard.any { Alerts.sounds(it.kind, looking(it)) }) Alerts.play(app)
     }
     /** The options a blocked agent shows (a permission or a question), read off its screen; the prompt may draw a moment after its status. */
     private suspend fun menu(a: Alerts.Alert, client: CoreClient): Prompt.Menu? {
@@ -430,7 +428,6 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
                 .fold({ "You: $text" }, { e -> "Not sent: ${e.message ?: "the core refused it"}" })
         } ?: "Not confirmed: check the terminal before sending again."
     }
-    fun dismissAlert(shown: Alerts.Alert) { _state.update { if (it.alert === shown) it.copy(alert = null) else it } }
     fun setAlerts(sounds: Boolean = state.value.alertSounds, blocked: Boolean = state.value.alertBlocked, done: Boolean = state.value.alertDone) {
         prefs.edit { putBoolean("alert_sounds", sounds); putBoolean("alert_blocked", blocked); putBoolean("alert_done", done) }
         _state.update { it.copy(alertSounds = sounds, alertBlocked = blocked, alertDone = done) }
