@@ -19,7 +19,9 @@ data class MachineState(val connecting: Boolean = false, val connected: Boolean 
     val terminals: List<CoreTerminal> = emptyList(), val spaces: List<PocketSpace> = emptyList(), val error: String? = null,
     val session: Int = 0, val needsPassword: Boolean = false, val linked: List<LinkedMachine> = emptyList(),
     /** Desktop avatar colours (shared.json space.colors), by space id. */
-    val colors: Map<String, String> = emptyMap()) {
+    val colors: Map<String, String> = emptyMap(),
+    /** Git answers for the drawer, by Sidebar.gitKey: null is not a repository. */
+    val git: Map<String, GitInfo?> = emptyMap()) {
     /** Dropped or failed, as opposed to never connected or disconnected on purpose. */
     val offline get() = !connected && (connecting || error != null)
     /** Worth retrying without asking: a dropped or failed connection that isn't waiting on a password. */
@@ -60,6 +62,16 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     val programs: Programs by lazy { Programs(JSONObject(application.assets.open("programs.json").bufferedReader().use { it.readText() })) }
     private val colorsRead = ConcurrentHashMap<String, Long>()
     private val homes = ConcurrentHashMap<String, String>()
+    private val herdrHomes = ConcurrentHashMap<String, String>()
+    // Git for the drawer runs in its own slow loop, never in the event refresh: one pass after connecting, a re-check when
+    // a terminal stops working, and the desktop's 60 s fallback only while the drawer is open.
+    private val gitWake = Channel<Unit>(Channel.CONFLATED)
+    private val gitChecked = ConcurrentHashMap<String, Long>()
+    private val gitDirty: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    private val wasWorking = ConcurrentHashMap<String, Set<String>>()
+    @Volatile private var drawerOpen = false
+    private val iconsTried: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    fun drawerOpen(open: Boolean) { drawerOpen = open; if (open) gitWake.trySend(Unit) }
     fun toggleFold(key: String) {
         val folded = state.value.folded.let { if (key in it) it - key else it + key }
         prefs.edit { putStringSet("folded_machines", folded) }
@@ -92,6 +104,13 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
                 .onFailure { e -> _state.update { it.copy(message = "Could not create SSH key: ${e.message}") } }
         }
         Updater.check(quiet = true)
+        ProgramIcons.load(application)
+        viewModelScope.launch(Dispatchers.IO) {
+            while (true) {
+                withTimeoutOrNull(15_000) { gitWake.receive() }
+                for ((id, client) in clients.entries.toList()) runCatching { gitPass(id, client) }
+            }
+        }
     }
 
     fun dismissMessage() { _state.update { it.copy(message = null) } }
@@ -152,6 +171,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
                 val hello = c.start()
                 ensureActive()
                 clients[profile.id] = c
+                gitChecked.keys.removeIf { it.startsWith("${profile.id}|") }
                 temporaryPasswords.remove(profile.id)
                 updateMachine(profile.id) { it.copy(connecting = false, connected = true, version = hello.optString("version"), error = null, session = it.session + 1) }
                 val changes = Channel<Unit>(Channel.CONFLATED)
@@ -279,9 +299,67 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         // The desktop assigns colours as spaces appear; read them again now and then, never write them.
         val now = System.currentTimeMillis()
         if (now - (colorsRead[id] ?: 0L) > 30_000) { colorsRead[id] = now; runCatching { readColors(id, client) } }
+        runCatching { fetchIcons(id, client, terminals) }
+        gitWake.trySend(Unit)
+    }
+    /** Herdr desktop's config folder on the core's machine (it may have none: an SSH host without the app). */
+    private suspend fun herdrHome(id: String, client: CoreClient): String? = herdrHomes[id] ?: exec(client, "printenv", "HERDR_APP_HOME")
+        .ifBlank { (homes[id] ?: exec(client, "printenv", "HOME")).ifBlank { return null } + "/.config/herdr-app" }.also { herdrHomes[id] = it }
+    /** The desktop's own icons for the programs on screen, read from its icons folder once per launch; the APK bundles none. */
+    private suspend fun fetchIcons(id: String, client: CoreClient, terminals: List<CoreTerminal>) {
+        val wanted = (terminals.map { programs.of(it).icon } + listOf(programs.agent.icon, programs.shell.icon, programs.program.icon))
+            .filter { ProgramIcons.valid(it) && "$id|$it" !in iconsTried && !ProgramIcons.fresh(it) }.distinct()
+        if (wanted.isEmpty()) return
+        val home = herdrHome(id, client) ?: return
+        for (icon in wanted) {
+            iconsTried += "$id|$icon"
+            runCatching { client.call("file.read", JSONObject().put("path", "$home/$icon")) }.getOrNull()
+                ?.takeIf { it.optInt("last") >= it.optInt("lines") }?.optString("text")?.takeIf { it.contains("<svg") }
+                ?.let { ProgramIcons.save(icon, it) }
+        }
+    }
+    private suspend fun gitPass(id: String, client: CoreClient) {
+        val m = state.value.machines[id]?.takeIf { it.connected } ?: return
+        val byAddress = m.terminals.associateBy { it.address }
+        val working = m.terminals.filter { it.status == "working" }.map { it.address }.toSet()
+        val stopped = wasWorking.put(id, working).orEmpty() - working
+        val places = m.spaces.groupBy({ it.machine to Sidebar.place(it, byAddress) }) { it }
+        for ((where, spaces) in places) {
+            val (machine, place) = where
+            // Only folders the core reported, on machines that are up.
+            if (!place.startsWith("/") || (machine.isNotBlank() && m.linked.find { it.name == machine }?.connected != true)) continue
+            val key = Sidebar.gitKey(machine, place); val full = "$id|$key"
+            // A terminal that stops working may have committed or switched branch.
+            if (spaces.any { s -> s.tabs.any { t -> t.terminals.any { it in stopped } } }) gitDirty += full
+            val now = System.currentTimeMillis()
+            val last = gitChecked[full]
+            val dirty = gitDirty.remove(full)
+            val known = state.value.machines[id]?.git?.containsKey(key) == true
+            val repo = state.value.machines[id]?.git?.get(key) != null
+            if (!(last == null || dirty || (drawerOpen && (repo || !known) && now - last > 60_000))) continue
+            gitChecked[full] = now
+            runCatching { gitCheck(client, machine, place) }
+                .onSuccess { info -> updateMachine(id) { it.copy(git = it.git + (key to info)) } }
+                .onFailure { gitChecked[full] = now - 45_000 }   // unsure (machine away, odd error): keep the last answer, retry in 15 s
+        }
+    }
+    /** Not a repository is an answer (null); anything else that fails is unsure and throws. */
+    private suspend fun gitCheck(client: CoreClient, machine: String, place: String): GitInfo? {
+        val status = git(client, machine, place, GitInfo.STATUS)
+        if (status.first != 0) { if ("not a git repository" in status.third) return null; error(status.third.ifBlank { "git failed" }) }
+        val rev = git(client, machine, place, GitInfo.REV_PARSE)
+        if (rev.first != 0) error(rev.third.ifBlank { "git rev-parse failed" })
+        return GitInfo.parse(status.second, rev.second, place) ?: error("unreadable git answer")
+    }
+    private suspend fun git(client: CoreClient, machine: String, cwd: String, args: List<String>): Triple<Int, String, String> {
+        val params = JSONObject().put("argv", JSONArray(listOf("git", "--no-optional-locks") + args)).put("cwd", cwd)
+        if (machine.isNotBlank()) params.put("on", machine)
+        val r = withTimeout(20_000) { client.call("machine.exec", params) }
+        fun text(k: String) = String(java.util.Base64.getDecoder().decode(r.optString(k)), Charsets.UTF_8)
+        return Triple(if (r.optBoolean("timed_out")) -1 else r.optInt("code", -1), text("stdout"), text("stderr"))
     }
     private suspend fun readColors(id: String, client: CoreClient) {
-        val home = exec(client, "printenv", "HERDR_APP_HOME").ifBlank { (homes[id] ?: exec(client, "printenv", "HOME")).ifBlank { return } + "/.config/herdr-app" }
+        val home = herdrHome(id, client) ?: return
         val shared = JSONObject(client.call("file.read", JSONObject().put("path", "$home/shared.json")).optString("text", "{}"))
         val colors = shared.optJSONObject("space.colors") ?: return
         updateMachine(id) { it.copy(colors = colors.keys().asSequence().associateWith { k -> colors.optString(k) }) }

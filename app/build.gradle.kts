@@ -59,6 +59,8 @@ dependencies {
     implementation("computer.iroh:iroh-android:1.2.0")
     // A bundled QR scanner (camera + ZXing): works without Google Play services.
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    // Draws the desktop's own program icons (SVG), read from the person's desktop at runtime.
+    implementation("com.caverock:androidsvg-aar:1.4")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
 }

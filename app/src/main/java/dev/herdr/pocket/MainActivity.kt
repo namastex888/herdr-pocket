@@ -136,6 +136,8 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
     val discovered by vm.discovery.hosts.collectAsStateWithLifecycle()
     val nearby = (listOfNotNull(Discovery.emulatorHost) + discovered).filter { n -> state.hosts.none { it.host == n.host && it.port == n.port } }
     fun addNearby(n: NearbyHost) { addPrefill = n.prefill(); addHost = true }
+    // Git tails refresh while the drawer is open.
+    LaunchedEffect(drawer) { snapshotFlow { drawer.targetValue == DrawerValue.Open }.collect(vm::drawerOpen) }
     LaunchedEffect(state.message) { state.message?.let { snackbar.showSnackbar(it); vm.dismissMessage() } }
     // Self-update: offer each new build once, open Android's install prompt, and continue after the install permission screen.
     val update by Updater.state.collectAsStateWithLifecycle()
@@ -170,8 +172,8 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
                 Text("Spaces", color = SidebarDim, fontSize = 11.5.sp)
             }
             // Hosts in the order they were saved; each connection's spaces as the desktop groups and orders them.
-            val sidebar = state.hosts.mapNotNull { h -> state.machines[h.id]?.let { m -> SidebarHost(h.id, h.name, m.connected, m.spaces, m.terminals, m.linked, m.colors) } } +
-                state.machines.filterKeys { id -> state.hosts.none { it.id == id } }.map { (id, m) -> SidebarHost(id, vm.hostName(id), m.connected, m.spaces, m.terminals, m.linked, m.colors) }
+            val sidebar = state.hosts.mapNotNull { h -> state.machines[h.id]?.let { m -> SidebarHost(h.id, h.name, m.connected, m.spaces, m.terminals, m.linked, m.colors, m.git) } } +
+                state.machines.filterKeys { id -> state.hosts.none { it.id == id } }.map { (id, m) -> SidebarHost(id, vm.hostName(id), m.connected, m.spaces, m.terminals, m.linked, m.colors, m.git) }
             val rows = remember(sidebar, state.folded) { Sidebar.rows(sidebar, vm.programs, state.folded) }
             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 14.dp)) {
                 sidebarRows(rows, state.space, state.selected, onToggle = { vm.toggleFold(it.key.removePrefix("m:")) },
