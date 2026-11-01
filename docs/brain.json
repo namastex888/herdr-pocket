@@ -1,0 +1,30 @@
+{
+  "id": "brn_pocket",
+  "slug": "pocket",
+  "name": "Automagik Pocket",
+  "type": "generic",
+  "owner": {
+    "type": "agent",
+    "id": "local"
+  },
+  "homePath": ".",
+  "strategy": {
+    "default": "rag",
+    "segments": []
+  },
+  "embeddings": {
+    "enabled": true,
+    "model": "gemini-embedding-2",
+    "dims": 768
+  },
+  "extractor": {
+    "gateRules": {
+      "r1TemplateProtection": true,
+      "r2ConversasImmutable": true,
+      "r3PathWhitelist": true,
+      "r4CrossActorIdentity": true,
+      "r5DailyAppendOnly": true,
+      "actorChatIds": []
+    }
+  }
+}
