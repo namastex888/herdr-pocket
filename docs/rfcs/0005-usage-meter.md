@@ -35,7 +35,12 @@ everything under Design and Alternatives is a proposal, not a decision.
 - Summary doc schema version 2 (the phone's contract, in the README): per-project, per-task
   (repo + branch) and per-model 24 h / 7 d / 30 d windows, per-harness hourly (48 h) and daily
   (30 d) series. It fits 64 KiB by cutting the task list, then the project list, into `*_other`.
-- The desktop trigger, installers and the phone display are not built yet.
+- Each release carries the meter for macOS (arm64, x86_64) and Linux (static x86_64, aarch64)
+  with `SHA256SUMS`. While Pocket Link's bridge runs, it installs the matching build on this
+  computer and every connected herdr-core machine (hash checked first) and runs
+  `nice -n 19 automagik-meter sync` ten minutes after each pass, skipping machines on battery.
+  This answers open question 4 for Pocket Link users. A machine reached only over SSH, without
+  a desktop running the bridge, still needs the meter installed and scheduled by hand.
 - The app already reads herdr-core documents: it calls `doc.get` for the `herdr-app` document,
   locally and on forwarded machines (`android/app/src/main/java/ai/namastex/automagik/PocketViewModel.kt:440`,
   `:446`). A summary document would travel the same way.
