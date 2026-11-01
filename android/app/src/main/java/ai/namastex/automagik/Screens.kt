@@ -254,15 +254,20 @@ fun NearbyHost.prefill() = HostProfile("", name, host, "", port)
     }
 }
 
-/** Settings → About: check for a newer build, and install it. */
+/** Settings → About: check for a newer build, install it, and whether updates install on their own. */
 @Composable fun UpdateRow() {
     val update by Updater.state.collectAsStateWithLifecycle()
+    val auto by Updater.auto.collectAsStateWithLifecycle()
+    val updated by Updater.updated.collectAsStateWithLifecycle()
     val activity = LocalActivity.current
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        updated?.let { Text(it, color = Muted, fontSize = 12.sp, lineHeight = 17.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
         when (val u = update) {
-            is UpdateState.Available, is UpdateState.NeedsPermission -> {
-                val release = (u as? UpdateState.Available)?.release ?: (u as UpdateState.NeedsPermission).release
-                Button(onClick = { activity?.let(Updater::start) }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("Update to ${release.label}") }
+            is UpdateState.Available, is UpdateState.NeedsPermission, is UpdateState.Waiting -> {
+                val release = when (u) { is UpdateState.Available -> u.release; is UpdateState.NeedsPermission -> u.release; else -> (u as UpdateState.Waiting).release }
+                Button(onClick = { activity?.let(Updater::start) }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                    Text(if (u is UpdateState.Waiting) "Install ${release.label} now" else "Update to ${release.label}") }
+                if (u is UpdateState.Waiting) Text("Downloaded. It installs on its own when you leave Automagik.", color = Muted, fontSize = 12.sp, lineHeight = 17.sp)
                 if (release.notes.isNotBlank()) Text(release.notes, color = Muted, fontSize = 12.sp, lineHeight = 17.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
                 if (u is UpdateState.NeedsPermission) Text("Allow Automagik to install apps, then come back here. Android asks this once.", color = Muted, fontSize = 12.sp, lineHeight = 17.sp)
             }
@@ -284,6 +289,9 @@ fun NearbyHost.prefill() = HostProfile("", name, host, "", port)
             }
         }
         if ((update as? UpdateState.Failed)?.release != null) TextButton(onClick = { activity?.let(Updater::start) }, contentPadding = PaddingValues(0.dp)) { Text("Try again") }
+        AlertRow("Install updates automatically", if (Build.VERSION.SDK_INT >= UpdatePolicy.SILENT_SDK)
+            "New versions download on Wi-Fi and install while you’re away from the app; a notification says so after. Off, a notification asks first."
+            else "Android ${Build.VERSION.RELEASE} asks before each update: a notification says when one is ready.", auto) { Updater.setAuto(it) }
     }
 }
 

@@ -137,6 +137,25 @@ What the numbers mean:
 With **Answer from the lock screen** off, the panel asks you to unlock first. If the side button
 stops opening it, for example after reinstalling, set the assistant again.
 
+## Updates
+
+- The app looks for a new version when it opens (at most every 15 minutes) and every 6 hours while
+  it or **Watch in background** runs. **Settings → About → Check for updates** looks now.
+- **Install updates automatically** (Settings → About, on by default): on Android 12 and newer the
+  new version downloads on Wi-Fi or another unmetered network, its SHA-256 is checked against the
+  release, and Android installs it without asking.
+- It never installs under you. While a terminal is open on screen it waits; on any other screen it
+  waits until the app has been left untouched for 10 minutes. Leave the app or turn the screen off
+  and it installs at once.
+- Android closes the app to update it. A quiet notification in the **Updates** channel then says
+  **Updated to X** with the release's first note, and Settings → About shows the same line.
+  Connections don't come back on their own after an update: open the app to reconnect.
+- When Android won't install silently, a notification says **Automagik X is ready**, once per
+  version. Tap **Install** to open Settings and Android's confirm prompt. This happens on Android
+  11 and older, on a phone plan, with the switch off, until Automagik may install apps (the first
+  tap asks), and when Android asks to confirm (for example when another app store owns the app's
+  updates).
+
 ## Limits in detail
 
 - The Pocket Link bridge runs as a LaunchAgent on macOS or a systemd user service on Linux.

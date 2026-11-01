@@ -52,7 +52,7 @@ More detail: [docs/guides/using.md](docs/guides/using.md).
 - **Watch in background:** stays connected while you're away and reconnects on its own.
 - **Side-button assistant:** hold the side button, even on the lock screen, to see what needs you
   and answer by typing or speaking.
-- **Updates itself** from GitHub Releases.
+- **Updates itself** from GitHub Releases, in the background.
 - **Automagik Stage theme,** light and dark, following the phone.
 
 ## Privacy and safety
@@ -75,13 +75,17 @@ More detail: [docs/guides/using.md](docs/guides/using.md).
 
 ## Updates
 
-1. The app checks when it opens. Or tap **Settings → About → Check for updates**.
-2. The first time, allow Automagik to install apps. On Android 12 and newer, later updates install
-   without asking.
-3. The app closes while it updates. Open it again.
+1. The app checks when it opens and every 6 hours while it or **Watch in background** runs. Or tap
+   **Settings → About → Check for updates**.
+2. On Android 12 and newer, once Automagik may install apps, a new version downloads on Wi-Fi and
+   installs on its own after you leave the app. A quiet notification then says **Updated to X**.
+3. Otherwise a notification says **Automagik X is ready**: Android 11 and older, a phone plan,
+   **Install updates automatically** off, before you've allowed installs (the first tap asks), or
+   when Android wants a confirmation. Tap **Install** and confirm.
 
-A copy signed with a different key (a debug build, a pull request artifact) can't update. Uninstall
-it once and install the release.
+Updating closes the app, and with it any connections; open it again to reconnect. A copy signed
+with a different key (a debug build, a pull request artifact) can't update. Uninstall it once and
+install the release.
 
 ## Build from source
 

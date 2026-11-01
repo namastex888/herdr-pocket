@@ -58,7 +58,7 @@ class MainActivity : ComponentActivity() {
     private val vm get() = (application as PocketApplication).vm
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (savedInstanceState == null) { openLink(intent); openAlert(intent) }
+        if (savedInstanceState == null) { openLink(intent); openAlert(intent); openUpdate(intent) }
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.auto(0xfffbf6ee.toInt(), 0xff262029.toInt())
@@ -69,7 +69,16 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); openLink(intent); openAlert(intent) }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); openLink(intent); openAlert(intent); openUpdate(intent) }
+    // A waiting update doesn't install under someone using the app.
+    override fun onUserInteraction() { super.onUserInteraction(); Updater.touched() }
+    // The "ready" notification: show Settings → About, where the update's progress is, and run Android's confirm flow.
+    private fun openUpdate(intent: Intent?) {
+        if (intent?.action != Updater.ACTION_INSTALL) return
+        vm.navigate(Nav.SETTINGS)
+        Updater.installFromNotification(this)
+        setIntent(Intent(this, MainActivity::class.java))
+    }
     // A notification's tap opens its agent.
     private fun openAlert(intent: Intent?) {
         val ref = Notify.opened(intent) ?: return
@@ -139,18 +148,13 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
     val gitScreen = selected == null && (state.screen == Nav.PROJECTS || state.screen == Nav.TASKS)
     LaunchedEffect(gitScreen) { vm.gitShown(gitScreen) }
     LaunchedEffect(state.message) { state.message?.let { snackbar.showSnackbar(it); vm.dismissMessage() } }
-    // Self-update: offer each new build once, open Android's install prompt, and continue after the install permission screen.
+    // Self-update runs in the background and speaks through notifications (see Updater); the screen only opens Android's
+    // confirm prompt for an install the person started, and continues after the install permission screen.
     val update by Updater.state.collectAsStateWithLifecycle()
-    var offered by rememberSaveable { mutableLongStateOf(0L) }
     LaunchedEffect(update) {
         when (val u = update) {
-            is UpdateState.Available -> if (u.release.versionCode != offered) {
-                offered = u.release.versionCode
-                if (snackbar.showSnackbar("Automagik ${u.release.label} is available", "Update", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed)
-                    activity?.let(Updater::start)
-            }
             is UpdateState.Confirm -> { runCatching { activity?.startActivity(u.intent) }; Updater.confirming(u.release) }
-            is UpdateState.Failed -> if (state.screen != "settings") snackbar.showSnackbar(u.message)
+            is UpdateState.Available -> if (Updater.takeStartWhenFound()) activity?.let(Updater::start)
             else -> {}
         }
     }
@@ -205,7 +209,7 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
                     if (root && state.screen == Nav.MACHINES) IconButton(onClick = { addHost = true }) { Icon(Icons.Outlined.Add, "Add machine", tint = Accent) }
                     if (root) IconButton(onClick = { vm.navigate(Nav.SETTINGS) }) { Icon(Icons.Outlined.Settings, "Settings", tint = Muted) }
                 }
-                (update as? UpdateState.Downloading)?.let { LinearProgressIndicator(progress = { it.progress }, Modifier.fillMaxWidth().height(2.dp), color = Accent, trackColor = Border) }
+                (update as? UpdateState.Downloading)?.takeIf { it.manual }?.let { LinearProgressIndicator(progress = { it.progress }, Modifier.fillMaxWidth().height(2.dp), color = Accent, trackColor = Border) }
                     ?: HorizontalDivider(color = Border)
                 if (state.demo) Row(Modifier.fillMaxWidth().background(Accent.copy(alpha = .09f)).padding(start = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Interface preview · sample data", color = Accent, fontSize = 12.sp, modifier = Modifier.weight(1f))

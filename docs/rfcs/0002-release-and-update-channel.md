@@ -43,25 +43,33 @@ self-update: installed copies update "with no Play Store needed".
 ### The `latest.json` contract
 
 URL that installed copies read: `https://github.com/automagik-dev/automagik-pocket/releases/latest/download/latest.json`
-(`android/app/build.gradle.kts:29`). A build sets another with the Gradle property `pocket.updateUrl`.
+(`android/app/build.gradle.kts:31`). A build sets another with the Gradle property `pocket.updateUrl`.
 
 | Field | Rule in the app (`Updater.kt`) |
 |---|---|
-| `versionCode` | number above 0; offered only if higher than the installed one (`:37`, `:67`) |
-| `versionName` | control characters dropped, at most 40 characters (`:38`) |
-| `url` | must start with `https://` (`:37`); redirects are followed (`:114`) |
-| `sha256` | 64 hex characters (`:31`); the download must match it or it is deleted (`:139-140`) |
-| `notes` | optional, at most 600 characters (`:39`) |
+| `versionCode` | number above 0; offered only if higher than the installed one (`:47`, `:118`) |
+| `versionName` | control characters dropped, at most 40 characters (`:48`) |
+| `url` | must start with `https://`; `http://` only when the build's own update URL is `http://`, a local test server (`:47`); redirects are followed (`:264`) |
+| `sha256` | 64 hex characters (`:40`); the download must match it or it is deleted (`:299`) |
+| `notes` | optional, at most 600 characters (`:49`); its first line goes in the update notifications |
 
-The file is read up to 8 KB (`:109`). The APK may be at most 200 MB (`:60`).
+The file is read up to 8 KB (`:259`). The APK may be at most 200 MB (`:80`).
 
 ### Install path
 
-1. First update: Android's "Install unknown apps" screen, once (`Updater.kt:88-91`).
-2. Android 12 and newer: installs without another prompt (`Updater.kt:150`). Older versions show
-   "Update this app?".
-3. Android rejects an APK signed with another key. The app then says to uninstall once and
-   install the release (`Updater.kt:170-171`).
+1. The app checks when it opens (at most every 15 minutes) and every 6 hours while it runs
+   (`Updater.kt:121-150`). Settings → About → Check for updates checks now.
+2. Android 12 and newer, with **Install updates automatically** on, install-apps allowed and an
+   unmetered network: the APK downloads in the background and installs without a prompt
+   (`USER_ACTION_NOT_REQUIRED`, `Updater.kt:315`) once the app isn't in use (`UpdatePolicy.kt`).
+   Android allows it because the app updates itself.
+3. Otherwise, or when Android answers `STATUS_PENDING_USER_ACTION`, a low-importance notification
+   offers the build once; a tap opens Android's "Install unknown apps" screen the first time
+   (`Updater.kt:234`), then "Update this app?".
+4. After an update, the new build posts "Updated to X" (`MY_PACKAGE_REPLACED`, `Updater.kt` `announce`).
+5. Android rejects an APK signed with another key. The app then says to uninstall once and
+   install the release (`Updater.kt:348`).
+6. Decision: [updates install silently](../decisions/updates-install-silently.md).
 
 ### Forks
 
@@ -77,6 +85,9 @@ A fork signs with its own key and points `pocket.updateUrl` at its own `latest.j
   goes up, which Google Play needs.
 - Owner, 2026-11-01: the per-push `build-*` releases on `main` from #6 are removed (PR #18).
   **Superseded** the #6 publishing step.
+- Owner, 2026-11-01: new versions install on their own in the background, and the person is told
+  afterwards, by native notifications rather than an in-app bar
+  ([decision](../decisions/updates-install-silently.md)).
 
 ## Alternatives considered
 

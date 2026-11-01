@@ -96,6 +96,10 @@ same key.
   every installed copy would have to uninstall.
 - A fork signs with its own key and sets `pocket.updateUrl` in `android/gradle.properties` to its
   own `latest.json`.
+- To test self-update on an emulator, build an older copy with `-Ppocket.versionCode=1` and a
+  normal one, both with `-Ppocket.updateUrl=http://10.0.2.2:PORT/latest.json`, and serve the newer
+  APK and its `latest.json` from the computer. Debug builds alone may use plain HTTP, and only to
+  `10.0.2.2` (`android/app/src/debug/`).
 
 ## 6. Where things are
 
@@ -113,7 +117,7 @@ App code, `android/app/src/main/java/ai/namastex/automagik/`:
 | `KeyInput.kt`, `TerminalModes.kt` | Key row modifiers, cursor and paste encoding |
 | `Notify.kt`, `Alerts.kt`, `Prompt.kt`, `WatchService.kt` | Notifications, buttons, background watch |
 | `AssistActivity.kt` | Side-button assistant panel |
-| `Updater.kt` | Self-update from GitHub releases |
+| `Updater.kt`, `UpdatePolicy.kt` | Self-update from GitHub releases: checks, silent install, notifications; the pure rules |
 | `Theme.kt` | Automagik Stage colours, light and dark |
 
 Desktop mod: `desktop/pocket-link/` — see its [README](../../desktop/pocket-link/README.md) and
