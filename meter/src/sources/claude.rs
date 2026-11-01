@@ -136,6 +136,7 @@ fn tokens(
         cache_write_1h: w1h,
         output: output.max(0),
         reasoning: reasoning.clamp(0, output.max(0)),
+        unsplit: 0,
     }
 }
 
@@ -214,6 +215,7 @@ pub fn parse_line(line: &[u8], ctx: &mut FileCtx, out: &mut Vec<UsageEvent>) -> 
         parent_session: ctx.parent_session.clone(),
         cwd,
         branch,
+        repo: None,
         tokens: tokens(
             u.input_tokens,
             u.output_tokens,
@@ -284,7 +286,8 @@ mod tests {
                 cache_write_5m: 100,
                 cache_write_1h: 200,
                 output: 40,
-                reasoning: 10
+                reasoning: 10,
+                unsplit: 0,
             }
         );
         assert!(!format!("{e:?}").contains("SECRET-TEXT"));

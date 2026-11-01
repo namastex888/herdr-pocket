@@ -107,6 +107,7 @@ pub fn parse_line(line: &[u8], ctx: &mut FileCtx, out: &mut Vec<UsageEvent>) -> 
         cache_write_1h: 0,
         output: usage.output.max(0),
         reasoning: usage.reasoning_tokens.clamp(0, usage.output.max(0)),
+        unsplit: 0,
     };
     let reported_usd = usage
         .cost
@@ -129,6 +130,7 @@ pub fn parse_line(line: &[u8], ctx: &mut FileCtx, out: &mut Vec<UsageEvent>) -> 
         parent_session: ctx.parent_session.clone(),
         cwd: ctx.cwd.clone(),
         branch: None,
+        repo: None,
         tokens,
         precision: Precision::Exact,
         reported_usd,

@@ -6,6 +6,8 @@
 //!   of its first bytes) so a rewritten or truncated file is noticed.
 //! - `seen`: a bounded set of dedupe-key hashes, oldest evicted first.
 //! - `sessions`: which harness session a sub-agent transcript rolls up to.
+//! - `codex_threads`: the last cumulative token count seen per Codex thread, keyed by thread id
+//!   so a rollout that moves (to `archived_sessions`) is never counted twice.
 //!
 //! Every chunk of a log is applied in one transaction that adds its usage, records its keys and
 //! advances the file's offset, so a killed run leaves either all of a chunk or none of it.
@@ -17,6 +19,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use crate::event::{Precision, RollupKey, Tokens, key_hash};
 use crate::sources::FileCtx;
+use crate::sources::codex::{CodexCtx, Cum};
 
 pub const SCHEMA_VERSION: i64 = 1;
 /// How many dedupe keys are kept. Claude repeats a message on adjacent lines, so the window only
@@ -102,6 +105,7 @@ CREATE TABLE IF NOT EXISTS usage (
   cache_write_1h INTEGER NOT NULL DEFAULT 0,
   output INTEGER NOT NULL DEFAULT 0,
   reasoning INTEGER NOT NULL DEFAULT 0,
+  unsplit INTEGER NOT NULL DEFAULT 0,
   precision TEXT NOT NULL,
   reported_usd REAL,
   events INTEGER NOT NULL DEFAULT 0,
@@ -130,7 +134,11 @@ CREATE TABLE IF NOT EXISTS health (
   duplicates INTEGER NOT NULL DEFAULT 0, skipped_lines INTEGER NOT NULL DEFAULT 0,
   rewrites INTEGER NOT NULL DEFAULT 0
 );
-CREATE VIEW IF NOT EXISTS ae_usage AS SELECT id, json_object(
+CREATE TABLE IF NOT EXISTS codex_threads (
+  id TEXT PRIMARY KEY, path TEXT, cum TEXT NOT NULL, counted INTEGER NOT NULL
+);
+DROP VIEW IF EXISTS ae_usage;
+CREATE VIEW ae_usage AS SELECT id, json_object(
   'schema', 'ae/1', 'id', id, 'type', 'agent.usage',
   'ts', strftime('%Y-%m-%dT%H:%M:%SZ', hour_ms / 1000, 'unixepoch'),
   'actor', json_object('bot', bot, 'role', role, 'squad', squad, 'harness', harness,
@@ -140,7 +148,7 @@ CREATE VIEW IF NOT EXISTS ae_usage AS SELECT id, json_object(
   'data', json_object('input_uncached', input_uncached, 'cache_read', cache_read,
                       'cache_write_5m', cache_write_5m, 'cache_write_1h', cache_write_1h,
                       'output', output, 'reasoning', reasoning, 'precision', precision,
-                      'reported_usd', reported_usd),
+                      'unsplit', unsplit, 'reported_usd', reported_usd),
   'idempotency_key', id) AS envelope FROM usage;
 ";
 
@@ -158,6 +166,24 @@ impl Store {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
+        // Stores made before `unsplit` existed: add the column before the view that names it.
+        let has_usage: bool = conn.query_row(
+            "SELECT count(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'usage'",
+            [],
+            |r| r.get(0),
+        )?;
+        if has_usage {
+            let has_unsplit: bool = conn.query_row(
+                "SELECT count(*) > 0 FROM pragma_table_info('usage') WHERE name = 'unsplit'",
+                [],
+                |r| r.get(0),
+            )?;
+            if !has_unsplit {
+                conn.execute_batch(
+                    "ALTER TABLE usage ADD COLUMN unsplit INTEGER NOT NULL DEFAULT 0",
+                )?;
+            }
+        }
         conn.execute_batch(SCHEMA)?;
         // Stores made before `head_skip` existed.
         let has_skip: bool = conn.query_row(
@@ -198,12 +224,19 @@ impl Store {
     /// Drops every row and offset so the next read imports again from `counted_from`.
     pub fn reset(&mut self, counted_from_ms: i64) -> rusqlite::Result<()> {
         let tx = self.conn.transaction()?;
-        tx.execute_batch("DELETE FROM usage; DELETE FROM files; DELETE FROM seen; DELETE FROM sessions; DELETE FROM health;")?;
+        tx.execute_batch(
+            "DELETE FROM usage; DELETE FROM files; DELETE FROM seen; DELETE FROM sessions;
+             DELETE FROM health; DELETE FROM codex_threads;",
+        )?;
         tx.execute(
             "INSERT INTO meta(k, v) VALUES('counted_from_ms', ?1) ON CONFLICT(k) DO UPDATE SET v = excluded.v",
             [counted_from_ms.to_string()],
         )?;
-        tx.execute("DELETE FROM meta WHERE k IN ('last_success_ms', 'last_pending_bytes', 'last_pending_files')", [])?;
+        tx.execute(
+            "DELETE FROM meta WHERE k IN ('last_success_ms', 'last_pending_bytes',
+             'last_pending_files', 'codex_watermark_ms', 'codex_bad_lines')",
+            [],
+        )?;
         tx.commit()
     }
 
@@ -259,6 +292,30 @@ impl Store {
         &mut self,
         file: &FileState,
         events: &[Attributed],
+        health: Health,
+        now_ms: i64,
+    ) -> rusqlite::Result<Health> {
+        self.apply(Some(file), &file.source, None, events, health, now_ms)
+    }
+
+    /// Applies usage that comes with no file (a Codex thread counted from its `tokens_used`) and
+    /// the thread's new cumulative, atomically.
+    pub fn apply_codex(
+        &mut self,
+        thread: &CodexCtx,
+        events: &[Attributed],
+        health: Health,
+        now_ms: i64,
+    ) -> rusqlite::Result<Health> {
+        self.apply(None, "codex", Some(thread), events, health, now_ms)
+    }
+
+    fn apply(
+        &mut self,
+        file: Option<&FileState>,
+        source: &str,
+        thread: Option<&CodexCtx>,
+        events: &[Attributed],
         mut health: Health,
         now_ms: i64,
     ) -> rusqlite::Result<Health> {
@@ -275,10 +332,12 @@ impl Store {
                    first_ms = min(first_ms, excluded.first_ms), last_ms = max(last_ms, excluded.last_ms)",
             )?;
             for e in events {
-                seq += 1;
-                if ins.execute(params![key_hash(&e.dedupe_key), seq])? == 0 {
-                    health.duplicates += 1;
-                    continue;
+                if !e.dedupe_key.is_empty() {
+                    seq += 1;
+                    if ins.execute(params![key_hash(&e.dedupe_key), seq])? == 0 {
+                        health.duplicates += 1;
+                        continue;
+                    }
                 }
                 health.events += 1;
                 let entry = rows.entry(e.key.clone()).or_insert((
@@ -305,14 +364,19 @@ impl Store {
             }
         }
         upsert_rows(&tx, &rows, now_ms)?;
-        put_file(&tx, file)?;
+        if let Some(file) = file {
+            put_file(&tx, file)?;
+        }
+        if let Some(t) = thread {
+            put_thread(&tx, t, None)?;
+        }
         tx.execute(
             "INSERT INTO health(source, usage_lines, events, duplicates, skipped_lines, rewrites)
              VALUES(?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(source) DO UPDATE SET usage_lines = usage_lines + excluded.usage_lines,
                events = events + excluded.events, duplicates = duplicates + excluded.duplicates,
                skipped_lines = skipped_lines + excluded.skipped_lines, rewrites = rewrites + excluded.rewrites",
-            params![file.source, health.usage_lines, health.events, health.duplicates, health.skipped_lines, health.rewrites],
+            params![source, health.usage_lines, health.events, health.duplicates, health.skipped_lines, health.rewrites],
         )?;
         tx.commit()?;
         Ok(health)
@@ -366,7 +430,7 @@ impl Store {
         let mut st = self.conn.prepare(
             "SELECT bot, role, harness, model, machine, repo, branch, hour_ms, squad,
                     input_uncached, cache_read, cache_write_5m, cache_write_1h, output, reasoning,
-                    precision, reported_usd, events
+                    precision, reported_usd, events, unsplit
              FROM usage WHERE hour_ms >= ?1 ORDER BY hour_ms, harness, model, repo, branch, bot, role",
         )?;
         let rows = st.query_map([from_ms], |r| {
@@ -389,6 +453,7 @@ impl Store {
                     cache_write_1h: r.get(12)?,
                     output: r.get(13)?,
                     reasoning: r.get(14)?,
+                    unsplit: r.get(18)?,
                 },
                 precision: r.get(15)?,
                 reported_usd: r.get(16)?,
@@ -396,6 +461,45 @@ impl Store {
             })
         })?;
         rows.collect()
+    }
+
+    /// A Codex thread's stored path, cumulative and counted total.
+    pub fn codex_thread(&self, id: &str) -> rusqlite::Result<Option<(Option<String>, Cum, i64)>> {
+        self.conn
+            .query_row(
+                "SELECT path, cum, counted FROM codex_threads WHERE id = ?1",
+                [id],
+                |r| {
+                    let cum: String = r.get(1)?;
+                    Ok((
+                        r.get(0)?,
+                        serde_json::from_str(&cum).unwrap_or_default(),
+                        r.get(2)?,
+                    ))
+                },
+            )
+            .optional()
+    }
+
+    /// (exact, total_only) Codex threads: a thread is `total_only` when part of what was counted
+    /// for it has no split.
+    pub fn codex_thread_counts(&self) -> rusqlite::Result<(i64, i64)> {
+        let mut st = self
+            .conn
+            .prepare("SELECT cum, counted FROM codex_threads WHERE counted > 0")?;
+        let mut exact = 0;
+        let mut total_only = 0;
+        let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+        for row in rows {
+            let (cum, counted) = row?;
+            let cum: Cum = serde_json::from_str(&cum).unwrap_or_default();
+            if cum.total < counted {
+                total_only += 1;
+            } else {
+                exact += 1;
+            }
+        }
+        Ok((exact, total_only))
     }
 
     pub fn count(&self, table: &str) -> rusqlite::Result<i64> {
@@ -434,6 +538,21 @@ fn put_file(tx: &Transaction<'_>, f: &FileState) -> rusqlite::Result<()> {
         f.rewrites,
         f.head_skip as i64
     ])?;
+    if let Some(t) = &f.ctx.codex {
+        put_thread(tx, t, Some(&f.path))?;
+    }
+    Ok(())
+}
+
+/// The thread's cumulative moves with the chunk that advanced it, in the same transaction.
+fn put_thread(tx: &Transaction<'_>, t: &CodexCtx, path: Option<&str>) -> rusqlite::Result<()> {
+    let cum = serde_json::to_string(&t.cum).unwrap_or_else(|_| "{}".into());
+    tx.prepare_cached(
+        "INSERT INTO codex_threads(id, path, cum, counted) VALUES(?1, ?2, ?3, ?4)
+         ON CONFLICT(id) DO UPDATE SET path = coalesce(excluded.path, path), cum = excluded.cum,
+           counted = excluded.counted",
+    )?
+    .execute(params![t.thread, path, cum, t.counted])?;
     Ok(())
 }
 
@@ -447,8 +566,8 @@ fn upsert_rows(
     let mut st = tx.prepare_cached(
         "INSERT INTO usage(id, hour_ms, bot, role, squad, harness, model, machine, repo, branch,
            input_uncached, cache_read, cache_write_5m, cache_write_1h, output, reasoning,
-           precision, reported_usd, events, updated_ms)
-         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
+           precision, reported_usd, events, updated_ms, unsplit)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
          ON CONFLICT(id) DO UPDATE SET
            squad = coalesce(excluded.squad, squad),
            input_uncached = input_uncached + excluded.input_uncached,
@@ -457,6 +576,7 @@ fn upsert_rows(
            cache_write_1h = cache_write_1h + excluded.cache_write_1h,
            output = output + excluded.output,
            reasoning = reasoning + excluded.reasoning,
+           unsplit = unsplit + excluded.unsplit,
            precision = CASE WHEN excluded.precision = 'total_only' THEN 'total_only' ELSE precision END,
            reported_usd = CASE WHEN excluded.reported_usd IS NULL THEN reported_usd
                                ELSE coalesce(reported_usd, 0) + excluded.reported_usd END,
@@ -484,7 +604,8 @@ fn upsert_rows(
             precision.as_str(),
             usd,
             n,
-            now_ms
+            now_ms,
+            t.unsplit
         ])?;
     }
     Ok(())
