@@ -21,6 +21,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -76,11 +81,31 @@ fun LazyListScope.sidebarRows(rows: List<SidebarRow>, activeSpace: Pair<String, 
     Row(Modifier.fillMaxWidth().height(if (row.nested) 28.dp else 34.dp).clip(RoundedCornerShape(8.dp))
         .background(if (active) SidebarSelected else Color.Transparent).clickable(onClick = onClick).padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(18.dp).background(Color(Sidebar.MARK[row.color] ?: Sidebar.MARK.getValue("ansi6")), RoundedCornerShape(5.dp)), contentAlignment = Alignment.Center) {
-            Text(row.letter, color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+        // A worktree nested under its main checkout: a branch glyph instead of the avatar.
+        if (row.nested) { Spacer(Modifier.width(14.dp)); BranchGlyph(); Spacer(Modifier.width(8.dp)) }
+        else {
+            Box(Modifier.size(18.dp).background(Color(Sidebar.MARK[row.color] ?: Sidebar.MARK.getValue("ansi6")), RoundedCornerShape(5.dp)), contentAlignment = Alignment.Center) {
+                Text(row.letter, color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.width(9.dp))
         }
-        Spacer(Modifier.width(9.dp))
-        Text(row.space.name, color = Ink, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Text(row.space.name, color = Ink, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 150.dp))
+        Row(Modifier.weight(1f).padding(start = 8.dp), horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+            if (row.tail.isNotEmpty()) Text(row.tail, color = SidebarDim, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+            if (row.ahead > 0) Text("↑${row.ahead}", color = Color(Sidebar.MARK.getValue("ansi2")), fontSize = 11.5.sp, maxLines = 1, softWrap = false)
+            if (row.behind > 0) Text("↓${row.behind}", color = Color(Sidebar.MARK.getValue("ansi1")), fontSize = 11.5.sp, maxLines = 1, softWrap = false)
+        }
+    }
+}
+
+/** Lucide's git-branch (ISC), 13 dp in dim, as the desktop draws nested worktree rows. */
+@Composable private fun BranchGlyph() {
+    Canvas(Modifier.size(13.dp)) {
+        val u = size.width / 24f; val stroke = Stroke(2 * u, cap = StrokeCap.Round)
+        drawLine(SidebarDim, Offset(6 * u, 3 * u), Offset(6 * u, 15 * u), 2 * u, StrokeCap.Round)
+        drawCircle(SidebarDim, 3 * u, Offset(18 * u, 6 * u), style = stroke)
+        drawCircle(SidebarDim, 3 * u, Offset(6 * u, 18 * u), style = stroke)
+        drawArc(SidebarDim, 0f, 90f, false, Offset(0f, 0f), androidx.compose.ui.geometry.Size(18 * u, 18 * u), style = stroke)
     }
 }
 
@@ -146,10 +171,15 @@ fun LazyListScope.sidebarRows(rows: List<SidebarRow>, activeSpace: Pair<String, 
     }
 }
 
-/** Until the desktop's own icons are fetched: a stand-in per kind of program, in the desktop's tint rules. */
+/** The desktop's own icon for the program once it's been read from the desktop; until then a stand-in.
+ *  As on the desktop, a tinted icon is one colour in the text colour, an untinted one keeps its own colours. */
 @Composable fun ProgramIcon(program: Program, size: Int) {
-    val (icon, tint) = programGlyph(program)
-    Icon(icon, null, Modifier.size(size.dp), tint = tint)
+    val svgs by ProgramIcons.svgs.collectAsState()
+    val px = with(LocalDensity.current) { size.dp.roundToPx() }
+    val svg = svgs[program.icon]
+    val bitmap = svg?.let { ProgramIcons.render(program.icon, it, px, if (program.tint) "#ffffff" else "#eeeeef") }
+    if (bitmap != null) Image(bitmap, null, Modifier.size(size.dp), colorFilter = if (program.tint) ColorFilter.tint(Ink) else null)
+    else { val (icon, tint) = programGlyph(program); Icon(icon, null, Modifier.size(size.dp), tint = tint) }
 }
 
 private fun programGlyph(p: Program): Pair<ImageVector, Color> = when (p.key) {

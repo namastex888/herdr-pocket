@@ -54,8 +54,9 @@ class Programs(table: JSONObject) {
 sealed interface SidebarRow { val key: String }
 data class MachineHeaderRow(override val key: String, val hostId: String, val machine: String, val title: String,
     val connected: Boolean, val state: String, val folded: Boolean) : SidebarRow
+/** [tail] is the desktop's repo · branch text, with [ahead]/[behind] beside it; a [nested] worktree draws a branch glyph. */
 data class SpaceRow(override val key: String, val hostId: String, val space: PocketSpace, val letter: String, val color: String,
-    val nested: Boolean) : SidebarRow
+    val nested: Boolean, val tail: String = "", val ahead: Int = 0, val behind: Int = 0) : SidebarRow
 data class AgentRow(override val key: String, val hostId: String, val terminal: CoreTerminal, val label: String, val program: Program,
     val status: String, val machineLabel: String?, val nested: Boolean) : SidebarRow
 data class KidRow(override val key: String, val hostId: String, val terminal: CoreTerminal, val label: String, val program: Program,
@@ -63,7 +64,9 @@ data class KidRow(override val key: String, val hostId: String, val terminal: Co
 
 /** What one connection contributes: its spaces (local first in document order, then remote), terminals and machines. */
 data class SidebarHost(val hostId: String, val name: String, val connected: Boolean, val spaces: List<PocketSpace>,
-    val terminals: List<CoreTerminal>, val machines: List<LinkedMachine>, val colors: Map<String, String> = emptyMap())
+    val terminals: List<CoreTerminal>, val machines: List<LinkedMachine>, val colors: Map<String, String> = emptyMap(),
+    /** Git answers by [Sidebar.gitKey]; null means not a repository, missing means not known yet. */
+    val git: Map<String, GitInfo?> = emptyMap())
 
 object Sidebar {
     /** Herdr desktop's avatar palette (spaces-agents MARK), by the space.colors names it stores. */
@@ -83,9 +86,13 @@ object Sidebar {
                     if (machine.isBlank()) host.connected else host.connected && linked?.connected == true,
                     if (machine.isBlank()) "" else linked?.state?.replace('_', ' ')?.ifBlank { null } ?: "asleep", foldKey in folded)
                 if (headers && foldKey in folded) continue
-                for (space in host.spaces.filter { it.machine == machine }) {
-                    out += SpaceRow("s:${host.hostId}:${space.id}", host.hostId, space, letter(space.name), host.colors[space.id] ?: "ansi6", false)
-                    agents(host, space, programs, false, out)
+                val byAddress = host.terminals.associateBy { it.address }
+                fun info(space: PocketSpace) = host.git[gitKey(machine, place(space, byAddress))]
+                for ((space, nested) in GitInfo.ordered(host.spaces.filter { it.machine == machine }, ::info)) {
+                    val git = info(space)
+                    out += SpaceRow("s:${host.hostId}:${space.id}", host.hostId, space, letter(space.name), host.colors[space.id] ?: "ansi6", nested,
+                        git?.tail(space.name, nested).orEmpty(), git?.ahead ?: 0, git?.behind ?: 0)
+                    agents(host, space, programs, nested, out)
                 }
             }
         }
@@ -93,6 +100,11 @@ object Sidebar {
     }
 
     fun letter(name: String) = name.firstOrNull()?.uppercase() ?: "?"
+
+    /** Where git runs for a space: the first of its terminals with a working directory, else the space's folder. */
+    fun place(space: PocketSpace, byAddress: Map<String, CoreTerminal>): String =
+        space.tabs.flatMap { it.terminals }.firstNotNullOfOrNull { byAddress[it]?.cwd?.ifBlank { null } } ?: space.folder
+    fun gitKey(machine: String, place: String) = "$machine|$place"
 
     // agents() order: the space's tabs, then panes; plain shells and programs with a pane get no row.
     private fun agents(host: SidebarHost, space: PocketSpace, programs: Programs, nested: Boolean, out: MutableList<SidebarRow>) {
