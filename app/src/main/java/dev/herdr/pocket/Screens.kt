@@ -31,6 +31,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.activity.compose.LocalActivity
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.util.UUID
 
 /** Machines a host's core reaches: live from the connection, or remembered from the last one. */
@@ -155,10 +157,44 @@ fun NearbyHost.prefill() = HostProfile("", name, host, "", port)
         Text("You can also pinch a terminal with two fingers to change its text size.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
         Spacer(Modifier.height(34.dp)); HorizontalDivider(color = Border); Spacer(Modifier.height(26.dp))
         SmallLabel("About"); Spacer(Modifier.height(15.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) { Brand(36); Spacer(Modifier.width(12.dp)); Column { Text("Herdr Pocket", fontWeight = FontWeight.SemiBold); Text("${BuildConfig.VERSION_NAME} · Android companion", color = Muted, fontSize = 12.sp) } }
+        Row(verticalAlignment = Alignment.CenterVertically) { Brand(36); Spacer(Modifier.width(12.dp)); Column { Text("Herdr Pocket", fontWeight = FontWeight.SemiBold); Text("${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · Android companion", color = Muted, fontSize = 12.sp) } }
+        Spacer(Modifier.height(16.dp)); UpdateRow()
         Spacer(Modifier.height(18.dp)); Text("A native companion for your existing herdr-core. Graphite colors, spaces and tabs follow the desktop’s design.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
         Spacer(Modifier.height(10.dp)); Text("Connections run while the app is open. Android may close them in the background; pull down on the agent list or tap Reconnect. Your remote programs keep running.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
         Spacer(Modifier.height(20.dp)); TextButton(onClick = vm::enterDemo, contentPadding = PaddingValues(0.dp)) { Text("Explore the interface with sample data", fontSize = 13.sp) }
+    }
+}
+
+/** Settings → About: check for a newer build, and install it. */
+@Composable fun UpdateRow() {
+    val update by Updater.state.collectAsStateWithLifecycle()
+    val activity = LocalActivity.current
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        when (val u = update) {
+            is UpdateState.Available, is UpdateState.NeedsPermission -> {
+                val release = (u as? UpdateState.Available)?.release ?: (u as UpdateState.NeedsPermission).release
+                Button(onClick = { activity?.let(Updater::start) }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("Update to ${release.label}") }
+                if (release.notes.isNotBlank()) Text(release.notes, color = Muted, fontSize = 12.sp, lineHeight = 17.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                if (u is UpdateState.NeedsPermission) Text("Allow Herdr Pocket to install apps, then come back here. Android asks this once.", color = Muted, fontSize = 12.sp, lineHeight = 17.sp)
+            }
+            is UpdateState.Downloading -> {
+                Text("Downloading ${u.release.label}…", fontSize = 13.sp)
+                LinearProgressIndicator(progress = { u.progress }, Modifier.fillMaxWidth(), color = Accent, trackColor = Border)
+            }
+            is UpdateState.Installing, is UpdateState.Confirm -> Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp); Spacer(Modifier.width(10.dp)); Text("Installing…", fontSize = 13.sp)
+            }
+            else -> Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(onClick = { Updater.check() }, enabled = u != UpdateState.Checking) { Text(if (u == UpdateState.Checking) "Checking…" else "Check for updates") }
+                Spacer(Modifier.width(12.dp))
+                when (u) {
+                    UpdateState.Current -> Text("You have the latest build.", color = Muted, fontSize = 12.sp)
+                    is UpdateState.Failed -> Text(u.message, color = Blocked, fontSize = 12.sp, lineHeight = 17.sp)
+                    else -> {}
+                }
+            }
+        }
+        if ((update as? UpdateState.Failed)?.release != null) TextButton(onClick = { activity?.let(Updater::start) }, contentPadding = PaddingValues(0.dp)) { Text("Try again") }
     }
 }
 

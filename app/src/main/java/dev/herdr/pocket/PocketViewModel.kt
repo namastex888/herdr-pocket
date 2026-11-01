@@ -91,6 +91,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
             runCatching { keys.publicKey() }.onSuccess { pub -> _state.update { it.copy(publicKey = pub) } }
                 .onFailure { e -> _state.update { it.copy(message = "Could not create SSH key: ${e.message}") } }
         }
+        Updater.check(quiet = true)
     }
 
     fun dismissMessage() { _state.update { it.copy(message = null) } }
