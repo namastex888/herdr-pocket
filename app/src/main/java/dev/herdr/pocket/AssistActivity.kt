@@ -60,8 +60,7 @@ class AssistActivity : ComponentActivity() {
             })
         }
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme(primary = Accent, onPrimary = Chrome, background = Canvas, onBackground = Ink,
-                surface = Surface, onSurface = Ink, surfaceVariant = Raised, onSurfaceVariant = Muted, outline = Border)) {
+            AutomagikTheme {
                 AssistPanel(vm, onClose = ::finish, onOpen = { ref ->
                     startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         .apply { ref?.let { putExtra(Notify.EXTRA_HOST, it.hostId).putExtra(Notify.EXTRA_ADDRESS, it.address) } })
@@ -90,7 +89,7 @@ class AssistActivity : ComponentActivity() {
             .navigationBarsPadding().imePadding().padding(18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Brand(26); Spacer(Modifier.width(10.dp))
-                Text("Herdr", fontWeight = FontWeight.SemiBold, fontSize = 17.sp, modifier = Modifier.weight(1f))
+                Text("Automagik", fontWeight = FontWeight.SemiBold, fontSize = 17.sp, modifier = Modifier.weight(1f))
                 TextButton(onClick = { onOpen(chosen?.ref) }) { Text("Open app") }
             }
             Spacer(Modifier.height(10.dp))

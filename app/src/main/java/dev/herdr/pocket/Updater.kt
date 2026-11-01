@@ -168,7 +168,7 @@ object Updater {
             PackageInstaller.STATUS_SUCCESS -> UpdateState.Current
             PackageInstaller.STATUS_FAILURE_ABORTED -> UpdateState.Available(release)
             PackageInstaller.STATUS_FAILURE_CONFLICT, PackageInstaller.STATUS_FAILURE_INCOMPATIBLE -> UpdateState.Failed(
-                "This copy of Herdr Pocket was signed with a different key. Uninstall it once, then install the release from GitHub.", null)
+                "This copy of Automagik was signed with a different key. Uninstall it once, then install the release from GitHub.", null)
             PackageInstaller.STATUS_FAILURE_STORAGE -> UpdateState.Failed("Not enough storage to install the update.", release)
             else -> UpdateState.Failed("Android didn’t install the update${message?.let { ": $it" }.orEmpty()}.", release)
         }

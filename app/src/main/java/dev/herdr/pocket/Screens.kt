@@ -56,7 +56,7 @@ fun PocketState.linkedFor(host: HostProfile): List<LinkedMachine> =
         SmallLabel("Through $via")
         linked.forEach { m ->
             Row(Modifier.padding(start = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                Dot(if (m.connected) Color(0xffa6bd91) else Muted); Spacer(Modifier.width(10.dp))
+                Dot(if (m.connected) Ok else Muted); Spacer(Modifier.width(10.dp))
                 Text(m.name, fontSize = 13.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(when { m.state.isBlank() -> "Connect to see status"; m.connected -> if (m.terminals == 1) "1 terminal" else "${m.terminals} terminals"; else -> m.state.replaceFirstChar(Char::uppercase) },
                     fontSize = 12.sp, color = Muted)
@@ -101,7 +101,7 @@ fun NearbyHost.prefill() = HostProfile("", name, host, "", port)
                             Text(host.name, fontWeight = FontWeight.Medium, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Spacer(Modifier.height(4.dp)); Text(if (host.paired) host.address else "${host.user}@${host.host}:${host.port}", fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        Dot(if (machine.connected) Color(0xffa6bd91) else Muted)
+                        Dot(if (machine.connected) Ok else Muted)
                     }
                     Spacer(Modifier.height(18.dp))
                     Text(if (machine.connected) "Connected · hc ${machine.version} · ${machine.terminals.size} terminals" else if (machine.connecting) "Connecting…" else "Not connected", fontSize = 12.sp, color = Muted)
@@ -174,10 +174,10 @@ fun NearbyHost.prefill() = HostProfile("", name, host, "", port)
         Spacer(Modifier.height(8.dp)); AssistantRow(); Spacer(Modifier.height(8.dp))
         AlertRow("Answer from the lock screen", "Notifications show what the agent asks on the lock screen, and Reply works there without unlocking.", state.lockAnswers) { vm.setLockAnswers(it) }
         Spacer(Modifier.height(4.dp))
-        Text("In the app, an alert is a sound and a toast; tap Open to go to its agent. Away from it, alerts are Android notifications you can reply to. They come while Herdr Pocket is connected.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
+        Text("In the app, an alert is a sound and a toast; tap Open to go to its agent. Away from it, alerts are Android notifications you can reply to. They come while Automagik is connected.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
         Spacer(Modifier.height(34.dp)); HorizontalDivider(color = Border); Spacer(Modifier.height(26.dp))
         SmallLabel("About"); Spacer(Modifier.height(15.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) { Brand(36); Spacer(Modifier.width(12.dp)); Column { Text("Herdr Pocket", fontWeight = FontWeight.SemiBold); Text("${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · Android companion", color = Muted, fontSize = 12.sp) } }
+        Row(verticalAlignment = Alignment.CenterVertically) { Brand(36); Spacer(Modifier.width(12.dp)); Column { Text("Automagik", fontWeight = FontWeight.SemiBold); Text("${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · Android companion", color = Muted, fontSize = 12.sp) } }
         Spacer(Modifier.height(16.dp)); UpdateRow()
         CrashRow()
         Spacer(Modifier.height(18.dp)); Text("A native companion for your existing herdr-core. Graphite colors, spaces and tabs follow the desktop’s design.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
@@ -186,7 +186,7 @@ fun NearbyHost.prefill() = HostProfile("", name, host, "", port)
     }
 }
 
-/** Settings: make Herdr Pocket the phone's assistant, so holding the side button opens its panel (lock screen too). */
+/** Settings: make Automagik the phone's assistant, so holding the side button opens its panel (lock screen too). */
 @Composable fun AssistantRow() {
     val context = LocalContext.current
     fun isHeld() = Build.VERSION.SDK_INT >= 29 && context.getSystemService(RoleManager::class.java).isRoleHeld(RoleManager.ROLE_ASSISTANT)
@@ -207,7 +207,7 @@ fun NearbyHost.prefill() = HostProfile("", name, host, "", port)
         Column(Modifier.weight(1f)) {
             Text("Side button assistant", fontSize = 15.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(2.dp))
-            Text(if (held) "Herdr Pocket is your assistant. Hold the side button to see what needs you and answer by typing or speaking, on the lock screen too."
+            Text(if (held) "Automagik is your assistant. Hold the side button to see what needs you and answer by typing or speaking, on the lock screen too."
                 else "Hold the side button to open Herdr over any screen, the lock screen too: see what needs you and answer by typing or speaking.",
                 color = Muted, fontSize = 12.sp, lineHeight = 17.sp)
         }
@@ -239,14 +239,14 @@ fun NearbyHost.prefill() = HostProfile("", name, host, "", port)
     val activity = LocalActivity.current
     Spacer(Modifier.height(18.dp))
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Blocked.copy(alpha = .08f)).border(1.dp, Blocked.copy(alpha = .25f), RoundedCornerShape(10.dp)).padding(14.dp, 12.dp, 6.dp, 4.dp)) {
-        Text("Herdr Pocket closed unexpectedly", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Text("Automagik closed unexpectedly", fontSize = 13.sp, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(4.dp))
         Text(crash.lines().drop(4).firstOrNull { it.isNotBlank() }.orEmpty(), color = Muted, fontSize = 11.sp, fontFamily = FontFamily.Monospace, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Row {
             TextButton(onClick = { clipboard.setText(AnnotatedString(crash)) }) { Text("Copy report", fontSize = 13.sp) }
             TextButton(onClick = {
                 runCatching { activity?.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
-                    .putExtra(android.content.Intent.EXTRA_SUBJECT, "Herdr Pocket crash").putExtra(android.content.Intent.EXTRA_TEXT, crash), "Send crash report")) }
+                    .putExtra(android.content.Intent.EXTRA_SUBJECT, "Automagik crash").putExtra(android.content.Intent.EXTRA_TEXT, crash), "Send crash report")) }
             }) { Text("Share", fontSize = 13.sp) }
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { CrashLog.clear(); report = null }) { Text("Clear", fontSize = 13.sp, color = Muted) }
@@ -264,7 +264,7 @@ fun NearbyHost.prefill() = HostProfile("", name, host, "", port)
                 val release = (u as? UpdateState.Available)?.release ?: (u as UpdateState.NeedsPermission).release
                 Button(onClick = { activity?.let(Updater::start) }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("Update to ${release.label}") }
                 if (release.notes.isNotBlank()) Text(release.notes, color = Muted, fontSize = 12.sp, lineHeight = 17.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
-                if (u is UpdateState.NeedsPermission) Text("Allow Herdr Pocket to install apps, then come back here. Android asks this once.", color = Muted, fontSize = 12.sp, lineHeight = 17.sp)
+                if (u is UpdateState.NeedsPermission) Text("Allow Automagik to install apps, then come back here. Android asks this once.", color = Muted, fontSize = 12.sp, lineHeight = 17.sp)
             }
             is UpdateState.Downloading -> {
                 Text("Downloading ${u.release.label}…", fontSize = 13.sp)

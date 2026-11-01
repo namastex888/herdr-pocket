@@ -20,6 +20,7 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.Image
@@ -40,13 +41,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// Herdr desktop's graphite sidebar colours, measured from the desktop window.
-val SidebarChrome = Color(0xff0c1016)
-val SidebarDim = Color(0xff65696f)
-val SidebarMuted = Color(0xff96989c)
-val SidebarInput = Color(0xff2e3237)
-val SidebarSelected = Color(0xff1b2129)
-val SidebarConnected = Color(0xff89c5aa)
 
 /** The drawer's machine/space/agent tree, row for row as Herdr desktop's sidebar draws it. */
 fun LazyListScope.sidebarRows(rows: List<SidebarRow>, activeSpace: Pair<String, String>?, focused: TerminalRef?,
@@ -100,12 +94,13 @@ fun LazyListScope.sidebarRows(rows: List<SidebarRow>, activeSpace: Pair<String, 
 
 /** Lucide's git-branch (ISC), 13 dp in dim, as the desktop draws nested worktree rows. */
 @Composable private fun BranchGlyph() {
+    val dim = SidebarDim
     Canvas(Modifier.size(13.dp)) {
         val u = size.width / 24f; val stroke = Stroke(2 * u, cap = StrokeCap.Round)
-        drawLine(SidebarDim, Offset(6 * u, 3 * u), Offset(6 * u, 15 * u), 2 * u, StrokeCap.Round)
-        drawCircle(SidebarDim, 3 * u, Offset(18 * u, 6 * u), style = stroke)
-        drawCircle(SidebarDim, 3 * u, Offset(6 * u, 18 * u), style = stroke)
-        drawArc(SidebarDim, 0f, 90f, false, Offset(0f, 0f), androidx.compose.ui.geometry.Size(18 * u, 18 * u), style = stroke)
+        drawLine(dim, Offset(6 * u, 3 * u), Offset(6 * u, 15 * u), 2 * u, StrokeCap.Round)
+        drawCircle(dim, 3 * u, Offset(18 * u, 6 * u), style = stroke)
+        drawCircle(dim, 3 * u, Offset(6 * u, 18 * u), style = stroke)
+        drawArc(dim, 0f, 90f, false, Offset(0f, 0f), androidx.compose.ui.geometry.Size(18 * u, 18 * u), style = stroke)
     }
 }
 
@@ -136,14 +131,15 @@ fun LazyListScope.sidebarRows(rows: List<SidebarRow>, activeSpace: Pair<String, 
 
 // One depth step: 9 wide plus 4 of margin. "├" and "└" draw the same L; "│" continues an ancestor; "" is blank.
 @Composable private fun TreeLine(marker: String) {
+    val line = SidebarInput
     Canvas(Modifier.padding(end = 4.dp).width(9.dp).fillMaxHeight()) {
         if (marker.isEmpty()) return@Canvas
         val stroke = 1.5.dp.toPx(); val x = stroke / 2; val mid = size.height / 2
-        if (marker == "│") { drawLine(SidebarInput, Offset(x, 0f), Offset(x, size.height), stroke); return@Canvas }
+        if (marker == "│") { drawLine(line, Offset(x, 0f), Offset(x, size.height), stroke); return@Canvas }
         val r = 6.dp.toPx()
         val path = Path().apply { moveTo(x, 0f); lineTo(x, mid - r); quadraticTo(x, mid, x + r, mid); lineTo(size.width, mid) }
-        drawPath(path, SidebarInput, style = Stroke(stroke))
-        if (marker == "├") drawLine(SidebarInput, Offset(x, mid), Offset(x, size.height), stroke)
+        drawPath(path, line, style = Stroke(stroke))
+        if (marker == "├") drawLine(line, Offset(x, mid), Offset(x, size.height), stroke)
     }
 }
 
@@ -153,12 +149,13 @@ fun LazyListScope.sidebarRows(rows: List<SidebarRow>, activeSpace: Pair<String, 
         "working" -> {
             val angle by rememberInfiniteTransition(label = "spinner").animateFloat(0f, 360f,
                 infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Restart), label = "spinner")
+            val working = Working
             Canvas(Modifier.padding(horizontal = 1.dp).size(12.dp).rotate(angle)) {
                 val stroke = 3.2f / 24f * size.width
                 val inset = stroke / 2
                 val arcSize = androidx.compose.ui.geometry.Size(size.width - stroke, size.height - stroke)
-                drawArc(Working.copy(alpha = .24f), 0f, 360f, false, Offset(inset, inset), arcSize, style = Stroke(stroke))
-                drawArc(Working, -90f, 90f, false, Offset(inset, inset), arcSize, style = Stroke(stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round))
+                drawArc(working.copy(alpha = .24f), 0f, 360f, false, Offset(inset, inset), arcSize, style = Stroke(stroke))
+                drawArc(working, -90f, 90f, false, Offset(inset, inset), arcSize, style = Stroke(stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round))
             }
         }
         "blocked" -> Box(Modifier.height(18.dp).background(Blocked.copy(alpha = .15f), RoundedCornerShape(5.dp)).padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
@@ -182,7 +179,7 @@ fun LazyListScope.sidebarRows(rows: List<SidebarRow>, activeSpace: Pair<String, 
     else { val (icon, tint) = programGlyph(program); Icon(icon, null, Modifier.size(size.dp), tint = tint) }
 }
 
-private fun programGlyph(p: Program): Pair<ImageVector, Color> = when (p.key) {
+@Composable @ReadOnlyComposable private fun programGlyph(p: Program): Pair<ImageVector, Color> = when (p.key) {
     "claude" -> Icons.Outlined.SmartToy to Color(0xffd97757)
     "codex" -> Icons.Outlined.SmartToy to Ink
     "shell" -> Icons.Outlined.Terminal to Ink

@@ -54,17 +54,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import java.util.UUID
 
-val Canvas = Color(0xff131518)
-val Chrome = Color(0xff101114)
-val Surface = Color(0xff17191d)
-val Raised = Color(0xff23252a)
-val Border = Color(0xff2d3035)
-val Ink = Color(0xffeeeeef)
-val Muted = Color(0xff989ba2)
-val Accent = Color(0xff96b2d7)
-val Working = Color(0xffe5c07b)
-val Blocked = Color(0xfff0705f)
-val Done = Color(0xff76a8ff)
 
 class MainActivity : ComponentActivity() {
     private val vm get() = (application as PocketApplication).vm
@@ -72,13 +61,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) { openLink(intent); openAlert(intent) }
         enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
-            navigationBarStyle = SystemBarStyle.dark(0xff101114.toInt())
+            statusBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.auto(0xfffbf6ee.toInt(), 0xff262029.toInt())
         )
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme(primary = Accent, onPrimary = Chrome, background = Canvas,
-                onBackground = Ink, surface = Surface, onSurface = Ink, surfaceVariant = Raised,
-                onSurfaceVariant = Muted, outline = Border, secondary = Accent, error = Blocked)) {
+            AutomagikTheme {
                 PocketApp(vm)
             }
         }
@@ -99,9 +86,9 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable fun Brand(size: Int = 28) {
-    Image(painterResource(R.drawable.herdr), "Herdr", Modifier.size(size.dp).clip(RoundedCornerShape((size / 4).dp)))
+    Image(painterResource(R.drawable.automagik), "Automagik", Modifier.size(size.dp).clip(RoundedCornerShape((size / 4).dp)))
 }
-fun stateColor(word: String) = when (word) { "blocked", "error" -> Blocked; "working" -> Working; "done" -> Done; else -> Muted }
+@Composable @ReadOnlyComposable fun stateColor(word: String) = when (word) { "blocked", "error" -> Blocked; "working" -> Working; "done" -> Done; else -> Muted }
 fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" -> "Working"; "done" -> "Done"; "error" -> "Error"; "idle" -> "Idle"; else -> "Terminal" }
 
 @Composable fun Dot(color: Color, size: Int = 6) { Box(Modifier.size(size.dp).background(color, CircleShape)) }
@@ -154,7 +141,7 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
         when (val u = update) {
             is UpdateState.Available -> if (u.release.versionCode != offered) {
                 offered = u.release.versionCode
-                if (snackbar.showSnackbar("Herdr Pocket ${u.release.label} is available", "Update", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed)
+                if (snackbar.showSnackbar("Automagik ${u.release.label} is available", "Update", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed)
                     activity?.let(Updater::start)
             }
             is UpdateState.Confirm -> { runCatching { activity?.startActivity(u.intent) }; Updater.confirming(u.release) }
@@ -178,7 +165,7 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
         if (open) vm.selectTerminal(a.ref)
     }
     LaunchedEffect(Unit) {
-        if (CrashLog.announce() && snackbar.showSnackbar("Herdr Pocket closed unexpectedly last time", "Report", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed)
+        if (CrashLog.announce() && snackbar.showSnackbar("Automagik closed unexpectedly last time", "Report", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed)
             vm.navigate("settings")
     }
     BackHandler(drawer.isOpen || selected != null || state.screen != "overview" || state.space != null) {
@@ -188,7 +175,7 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
     ModalNavigationDrawer(drawerState = drawer, gesturesEnabled = selected == null || drawer.isOpen, drawerContent = {
         ModalDrawerSheet(Modifier.width(310.dp), drawerContainerColor = SidebarChrome) {
             Row(Modifier.fillMaxWidth().padding(22.dp, 22.dp, 14.dp, 26.dp), verticalAlignment = Alignment.CenterVertically) {
-                Brand(30); Spacer(Modifier.width(10.dp)); Text("Herdr", color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 21.sp)
+                Brand(30); Spacer(Modifier.width(10.dp)); Text("Automagik", color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 21.sp)
                 Spacer(Modifier.weight(1f)); IconButton(onClick = { scope.launch { drawer.close() } }) { Icon(Icons.Outlined.Close, "Close navigation", tint = Muted) }
             }
             DrawerRow("Cockpit", Icons.Outlined.GridView, state.screen == "overview" && state.space == null,
@@ -381,7 +368,7 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 SmallLabel(if (space == null) "All machines" else space.folder.ifBlank { "Space" }, Modifier.weight(1f))
-                Row(verticalAlignment = Alignment.CenterVertically) { Dot(Color(0xffa6bd91)); Spacer(Modifier.width(6.dp)); Text("${state.machines.values.count { it.connected }} connected", color = Muted, fontSize = 12.sp) }
+                Row(verticalAlignment = Alignment.CenterVertically) { Dot(Ok); Spacer(Modifier.width(6.dp)); Text("${state.machines.values.count { it.connected }} connected", color = Muted, fontSize = 12.sp) }
             }
             Spacer(Modifier.height(12.dp))
             Text(if (space == null) "Cockpit" else space.name, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-.7).sp)

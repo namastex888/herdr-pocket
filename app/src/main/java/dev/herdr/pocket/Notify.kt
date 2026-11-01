@@ -68,7 +68,7 @@ object Notify {
             .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY).build()
         val text = sent ?: detail
         val n = NotificationCompat.Builder(context, if (kind == Alerts.BLOCKED) NEEDS_YOU else DONE)
-            .setSmallIcon(R.drawable.ic_notify).setColor(0xff96b2d7.toInt())
+            .setSmallIcon(R.drawable.ic_notify).setColor(BrandArgb)
             .setContentTitle(title).setContentText(text).setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setCategory(if (kind == Alerts.BLOCKED) NotificationCompat.CATEGORY_REMINDER else NotificationCompat.CATEGORY_STATUS)
             .setPriority(if (kind == Alerts.BLOCKED) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
@@ -108,7 +108,7 @@ object Notify {
             val detail = intent.getStringExtra(EXTRA_DETAIL).orEmpty()
             fun show(outcome: String) = post(context, ref, kind, title, detail, silent = true,
                 lockScreen = PocketViewModel.current?.state?.value?.lockAnswers ?: true, sent = outcome)
-            val vm = PocketViewModel.current ?: run { show("Not sent: open Herdr Pocket and connect first."); return }
+            val vm = PocketViewModel.current ?: run { show("Not sent: open Automagik and connect first."); return }
             val pending = goAsync()
             scope.launch {
                 try {
@@ -133,7 +133,7 @@ object Notify {
             if (text.isBlank()) return
             val pending = goAsync()
             val vm = PocketViewModel.current
-            if (vm == null) { show("Not sent: open Herdr Pocket and connect first."); pending.finish(); return }
+            if (vm == null) { show("Not sent: open Automagik and connect first."); pending.finish(); return }
             scope.launch {
                 try { show(vm.reply(ref, text)) } finally { pending.finish() }
             }
