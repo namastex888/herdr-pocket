@@ -59,11 +59,11 @@ printf 'sdk.dir=/absolute/path/to/Android/Sdk\n' > local.properties
 ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
 ```
 
-Install `app/build/outputs/apk/debug/app-debug.apk`. GitHub Actions (`.github/workflows/android.yml`) runs the same build, tests and lint, plus the terminal page checks, on every pull request and push to `main`. It requires Android 8.0/API 26 or newer, with app ID `dev.herdr.pocket`. Source includes a Gradle wrapper pinned to its distribution checksum.
+Install `app/build/outputs/apk/debug/app-debug.apk`. GitHub Actions (`.github/workflows/android.yml`) runs the same build, tests and lint, plus the terminal page checks, on every pull request and push to `main`. It requires Android 8.0/API 26 or newer, with app ID `ai.namastex.automagik`. Source includes a Gradle wrapper pinned to its distribution checksum.
 
 ### Install and update
 
-Every push to `main` publishes a release-signed build on the [Releases](https://github.com/namastex888/herdr-pocket/releases/latest) page. Install `herdr-pocket.apk` from there once. After that, the app checks for a newer build when it opens and offers it; **Settings → About → Check for updates** checks on demand. Android asks once to allow Herdr Pocket to install apps. On Android 12 and newer, updates then install without another prompt; older versions show Android's "Update this app?" confirmation. The app closes while it updates; open it again to continue.
+Every push to `main` publishes a release-signed build on the [Releases](https://github.com/namastex888/herdr-pocket/releases/latest) page. Install `automagik.apk` from there once. (Builds before the Automagik rename used the app ID `dev.herdr.pocket`; that copy cannot update to this one, so uninstall it and install `automagik.apk`.) After that, the app checks for a newer build when it opens and offers it; **Settings → About → Check for updates** checks on demand. Android asks once to allow Automagik to install apps. On Android 12 and newer, updates then install without another prompt; older versions show Android's "Update this app?" confirmation. The app closes while it updates; open it again to continue.
 
 Each release carries `latest.json` (version code, APK URL and SHA-256). The app installs only an APK whose hash matches, and Android installs it only if it's signed with the same key as the installed copy. A copy built with a different key (a pull request artifact, or a debug build from another machine) can't update in place: uninstall it once, then install the release.
 
