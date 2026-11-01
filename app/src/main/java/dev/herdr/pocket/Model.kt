@@ -15,7 +15,9 @@ data class HostProfile(
 ) {
     val paired get() = transport == "iroh"
     /** How the machine is reached, for its card. */
-    val address get() = if (paired) "Paired · Pocket Link" else "$user@$host" 
+    val address get() = if (paired) "Paired · Pocket Link" else "$user@$host"
+    /** What protects the connection, for the terminal's status line. */
+    val encryption get() = if (paired) "Pocket Link encrypted" else "SSH encrypted"
     fun json() = JSONObject().put("id", id).put("name", name).put("host", host)
         .put("user", user).put("port", port).put("session", session).put("fingerprint", fingerprint)
         .put("linked", JSONArray(linked)).put("transport", transport).put("ticket", ticket)

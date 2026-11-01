@@ -28,4 +28,9 @@ class PairingLinkTest {
         assertEquals(host, HostProfile.parse(host.json()))
         assertEquals("ssh", HostProfile.parse(JSONObject("""{"id":"a","name":"b","host":"c","user":"d"}""")).transport)
     }
+
+    @Test fun aPairedDesktopsTerminalSaysPocketLinkNotSsh() {
+        assertEquals("Pocket Link encrypted", HostProfile("id", "Mac", "0123456789ab", "", 0, transport = "iroh", ticket = ticket).encryption)
+        assertEquals("SSH encrypted", HostProfile("id", "Mac", "mac.local", "me").encryption)
+    }
 }

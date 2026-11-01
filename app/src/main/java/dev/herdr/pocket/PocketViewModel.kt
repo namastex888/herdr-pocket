@@ -46,7 +46,11 @@ data class PocketState(
     /** Folded drawer machine groups, as "hostId|machine". */
     val folded: Set<String> = emptySet(),
     /** Finished turns the person looked at on the phone ([Cockpit.seenKey]); they leave the cockpit's Done. */
-    val seen: Set<String> = emptySet()
+    val seen: Set<String> = emptySet(),
+    /** Settings > Alerts, phone-local like the desktop's settings.json `sounds`. */
+    val alertSounds: Boolean = true, val alertBlocked: Boolean = true, val alertDone: Boolean = true,
+    /** An agent that needs the person or finished, for the toast that opens it. */
+    val alert: Alerts.Alert? = null
 )
 const val DEFAULT_FONT_SIZE = 13
 val FONT_SIZES = 8..24
@@ -57,6 +61,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     private val keys = SshKeys(application.noBackupFilesDir)
     private val _state = MutableStateFlow(PocketState(nativeDisplay = prefs.getBoolean("native_display", false),
         fontSize = prefs.getInt("font_size", DEFAULT_FONT_SIZE).coerceIn(FONT_SIZES), folded = prefs.getStringSet("folded_machines", null).orEmpty().toSet(),
+        alertSounds = prefs.getBoolean("alert_sounds", true), alertBlocked = prefs.getBoolean("alert_blocked", true), alertDone = prefs.getBoolean("alert_done", true),
         seen = runCatching { JSONArray(prefs.getString("seen_done", "[]")).let { a -> (0 until a.length()).map(a::getString) }.toSet() }.getOrDefault(emptySet()), hosts = runCatching {
         JSONArray(prefs.getString("hosts", "[]")).objects().map(HostProfile::parse)
     }.getOrDefault(emptyList())))
@@ -284,6 +289,24 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     private fun updateMachine(id: String, transform: (MachineState) -> MachineState) {
         _state.update { it.copy(machines = it.machines + (id to transform(it.machines[id] ?: MachineState()))) }
     }
+    private val alertBase = ConcurrentHashMap<String, Pair<CoreClient, List<CoreTerminal>>>()
+    @Volatile private var foreground = false
+    fun setForeground(shown: Boolean) { foreground = shown }
+    private fun alert(found: List<Alerts.Alert>) {
+        val s = state.value
+        val wanted = found.filter { if (it.kind == Alerts.BLOCKED) s.alertBlocked else s.alertDone }
+        if (wanted.isEmpty() || s.demo) return
+        fun looking(a: Alerts.Alert) = foreground && s.selected == a.ref
+        if (s.alertSounds && wanted.any { Alerts.sounds(it.kind, looking(it)) }) Alerts.play(getApplication())
+        if (foreground) wanted.filterNot(::looking).maxByOrNull { if (it.kind == Alerts.BLOCKED) 1 else 0 }?.let { a -> _state.update { it.copy(alert = a) } }
+    }
+    fun dismissAlert(shown: Alerts.Alert) { _state.update { if (it.alert === shown) it.copy(alert = null) else it } }
+    fun setAlerts(sounds: Boolean = state.value.alertSounds, blocked: Boolean = state.value.alertBlocked, done: Boolean = state.value.alertDone) {
+        prefs.edit { putBoolean("alert_sounds", sounds); putBoolean("alert_blocked", blocked); putBoolean("alert_done", done) }
+        _state.update { it.copy(alertSounds = sounds, alertBlocked = blocked, alertDone = done) }
+    }
+    fun playAlert() = Alerts.play(getApplication())
+    private fun encryption(hostId: String) = state.value.hosts.find { it.id == hostId }?.encryption ?: "encrypted"
     private suspend fun refresh(id: String, client: CoreClient) {
         val list = client.call("terminal.list")
         val terminals = list.optJSONArray("terminals")?.objects()?.map(CoreTerminal::parse).orEmpty()
@@ -297,7 +320,12 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
                 .onSuccess { spaces.addAll(LayoutReader.spaces(it.optJSONObject("value"), name, terminals)) }
         }
         val linked = LinkedMachine.list(list, terminals)
+        // Compared with this connection's previous read only, so connecting never replays what was already waiting.
+        val previous = alertBase[id]?.takeIf { it.first === client }?.second
+        alertBase[id] = client to terminals
+        val paned = spaces.flatMap { it.addresses }.toSet()
         updateMachine(id) { it.copy(terminals = terminals, spaces = spaces, linked = linked, error = null) }
+        alert(Alerts.changes(previous, terminals, id) { it.address in paned })
         rememberLinked(id, linked.map { it.name })
         // The desktop assigns colours as spaces appear; read them again now and then, never write them.
         val now = System.currentTimeMillis()
@@ -414,7 +442,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
                 opened = channel
                 if (attachRevision == rev && !streamEnded) {
                     activeChannel = client to channel
-                    _state.update { it.copy(terminalStatus = "Live • SSH encrypted") }
+                    _state.update { it.copy(terminalStatus = "Live • ${encryption(selected.hostId)}") }
                 } else client.detach(channel)
             } catch (e: CancellationException) { opened?.let { runCatching { client.detach(it) } }; throw e }
             catch (e: Exception) { if (attachRevision == rev) _state.update { it.copy(terminalStatus = e.message ?: "Could not attach") } }
@@ -462,7 +490,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 if (rev != attachRevision) { client.detach(channel); return@launch }
                 activeChannel = client to channel
-                _state.update { it.copy(terminalStatus = "Live • SSH encrypted · text display") }
+                _state.update { it.copy(terminalStatus = "Live • ${encryption(ref.hostId)} · text display") }
                 snapshotJob = launch {
                     for (ignored in updates) {
                         delay(100)
