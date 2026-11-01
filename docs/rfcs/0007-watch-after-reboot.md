@@ -127,10 +127,10 @@ are read once at boot. [privacy](../privacy.md) lists the new permission.
 
 ## Alternatives considered
 
-- **WorkManager.** It can't start on its own after a reboot without the same permission:
-  WorkManager itself declares `RECEIVE_BOOT_COMPLETED` to reschedule work. A worker would also have
-  to start the foreground service from a background job, which the boot exemption doesn't cover.
-  More moving parts for the same result.
+- **WorkManager.** The app doesn't use it today. Running work after a reboot would still need the
+  same boot permission, and a worker would have to start the foreground service from a background
+  job, outside the boot broadcast that the exemption covers. That's a new library and more moving
+  parts for the same result.
 - **Do nothing.** Alerts stay off after every restart until the person opens the app, with no sign
   that they stopped. The "Limits" note in the guide is the only warning.
 - **`LOCKED_BOOT_COMPLETED`.** Earlier, but the preferences and keys can't be read before the first
