@@ -140,34 +140,25 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
     }
     fun closeDrawer(action: () -> Unit) { action(); scope.launch { drawer.close() } }
     ModalNavigationDrawer(drawerState = drawer, gesturesEnabled = selected == null || drawer.isOpen, drawerContent = {
-        ModalDrawerSheet(Modifier.width(310.dp), drawerContainerColor = Chrome) {
+        ModalDrawerSheet(Modifier.width(310.dp), drawerContainerColor = SidebarChrome) {
             Row(Modifier.fillMaxWidth().padding(22.dp, 22.dp, 14.dp, 26.dp), verticalAlignment = Alignment.CenterVertically) {
                 Brand(30); Spacer(Modifier.width(10.dp)); Text("Herdr", color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 21.sp)
                 Spacer(Modifier.weight(1f)); IconButton(onClick = { scope.launch { drawer.close() } }) { Icon(Icons.Outlined.Close, "Close navigation", tint = Muted) }
             }
             DrawerRow("All agents", Icons.Outlined.GridView, state.screen == "overview" && state.space == null,
                 trailing = state.machines.values.sumOf { it.terminals.count { t -> t.attention } }.takeIf { it > 0 }?.toString()) { closeDrawer(vm::showAll) }
-            Spacer(Modifier.height(24.dp))
-            Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically) {
-                SmallLabel("Spaces"); Spacer(Modifier.weight(1f))
-                Text("${state.machines.values.sumOf { it.spaces.size }}", fontSize = 12.sp, color = Muted)
+            Spacer(Modifier.height(14.dp))
+            Row(Modifier.fillMaxWidth().height(31.dp).padding(start = 16.dp, end = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Spaces", color = SidebarDim, fontSize = 11.5.sp)
             }
-            Spacer(Modifier.height(12.dp))
-            LazyColumn(Modifier.weight(1f)) {
-                state.machines.forEach { (hostId, machine) ->
-                    val hostName = vm.hostName(hostId)
-                    item {
-                        Row(Modifier.padding(24.dp, 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Dot(if (machine.connected) Color(0xffa6bd91) else Muted); Spacer(Modifier.width(8.dp))
-                            Text(hostName, color = Muted, fontSize = 12.sp)
-                        }
-                    }
-                    items(machine.spaces, key = { "$hostId:${it.id}" }) { s ->
-                        DrawerRow(s.name, Icons.Outlined.FolderOpen, state.space == (hostId to s.id), trailing = s.addresses.size.toString()) {
-                            closeDrawer { vm.selectSpace(hostId, s.id) }
-                        }
-                    }
-                }
+            // Hosts in the order they were saved; each connection's spaces as the desktop groups and orders them.
+            val sidebar = state.hosts.mapNotNull { h -> state.machines[h.id]?.let { m -> SidebarHost(h.id, h.name, m.connected, m.spaces, m.terminals, m.linked, m.colors) } } +
+                state.machines.filterKeys { id -> state.hosts.none { it.id == id } }.map { (id, m) -> SidebarHost(id, vm.hostName(id), m.connected, m.spaces, m.terminals, m.linked, m.colors) }
+            val rows = remember(sidebar, state.folded) { Sidebar.rows(sidebar, vm.programs, state.folded) }
+            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 14.dp)) {
+                sidebarRows(rows, state.space, state.selected, onToggle = { vm.toggleFold(it.key.removePrefix("m:")) },
+                    onSpace = { closeDrawer { vm.selectSpace(it.hostId, it.space.id) } },
+                    onTerminal = { closeDrawer { vm.selectTerminal(it) } })
                 if (state.machines.values.all { it.spaces.isEmpty() }) item {
                     Text("Your spaces appear here when you connect.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(24.dp, 12.dp))
                 }
