@@ -29,6 +29,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -68,6 +77,11 @@ import kotlin.math.roundToInt
     var message by remember(ref) { mutableStateOf("") }
     var showComposer by remember(ref) { mutableStateOf(false) }
     var controls by remember(ref) { mutableStateOf(false) }
+    // Full screen, scrolling back slides the space's tabs in over the terminal, like a phone browser's toolbar.
+    var tabsShown by remember(ref) { mutableStateOf(false) }
+    var lastScroll by remember(ref) { mutableLongStateOf(0L) }
+    val onScroll: (Boolean) -> Unit = { up -> tabsShown = up; lastScroll = System.nanoTime() }
+    LaunchedEffect(tabsShown, lastScroll) { if (tabsShown) { delay(6_000); tabsShown = false } }
     var focusTerminal by remember { mutableStateOf<(() -> Unit)?>(null) }
     val composerFocus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -84,8 +98,8 @@ import kotlin.math.roundToInt
             if (!fullscreen) TerminalTabs(vm, state, space)
             // A new connection session recreates the view, which attaches the terminal again.
             key(ref, state.nativeDisplay, machine?.session) {
-                if (state.nativeDisplay) NativeTerminal(vm, state.screenText, state.nativeAlternateScreen, state.fontSize, Modifier.fillMaxWidth().weight(1f))
-                else TerminalCanvas(vm, Modifier.fillMaxWidth().weight(1f)) { focusTerminal = it }
+                if (state.nativeDisplay) NativeTerminal(vm, state.screenText, state.nativeAlternateScreen, state.fontSize, Modifier.fillMaxWidth().weight(1f), onScroll)
+                else TerminalCanvas(vm, Modifier.fillMaxWidth().weight(1f), onScroll) { focusTerminal = it }
             }
             if (offline) OfflineStrip(vm.hostName(ref.hostId), machine?.connecting == true) { vm.reconnect(ref.hostId) }
             if (!offline && (!fullscreen || controls || keyboardVisible || showComposer)) TerminalKeys(vm, state)
@@ -100,6 +114,14 @@ import kotlin.math.roundToInt
                 Text(state.terminalStatus, color = if (state.terminalStatus.startsWith("Live")) Muted else Accent, fontSize = 11.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 IconButton(onClick = { showComposer = !showComposer; controls = false }) { Icon(Icons.Outlined.ChatBubbleOutline, "Toggle message composer", Modifier.size(20.dp), tint = if (showComposer) Accent else Muted) }
                 IconButton(onClick = { controls = false; if (state.nativeDisplay) showComposer = true else focusTerminal?.invoke() }) { Icon(Icons.Outlined.Keyboard, "Open terminal keyboard", Modifier.size(22.dp), tint = Accent) }
+            }
+        }
+        val tabbed = space != null && (space.tabs.size > 1 || space.tabs.any { ref.address in it.terminals && it.terminals.size > 1 })
+        AnimatedVisibility(fullscreen && !controls && tabsShown && tabbed, Modifier.align(Alignment.TopCenter).fillMaxWidth(),
+            enter = slideInVertically { -it } + fadeIn(), exit = slideOutVertically { -it } + fadeOut()) {
+            Column(Modifier.fillMaxWidth().background(Chrome.copy(alpha = .97f)).padding(end = 52.dp)) {
+                TerminalTabs(vm, state, space)
+                HorizontalDivider(color = Border)
             }
         }
         if (fullscreen && !controls) Surface(color = Chrome.copy(alpha = .80f), shape = RoundedCornerShape(12.dp), modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)) {
@@ -222,7 +244,8 @@ private fun openInBrowser(context: Context, url: String) {
     try { context.startActivity(intent) } catch (_: ActivityNotFoundException) { Toast.makeText(context, "No app can open this link", Toast.LENGTH_SHORT).show() }
 }
 
-@Composable fun NativeTerminal(vm: PocketViewModel, text: String, alternate: Boolean, fontSize: Int, modifier: Modifier) {
+@Composable fun NativeTerminal(vm: PocketViewModel, text: String, alternate: Boolean, fontSize: Int, modifier: Modifier, onScroll: (Boolean) -> Unit = {}) {
+    val reportScroll by rememberUpdatedState(onScroll)
     // While pinching, the size previews locally and is saved when the fingers lift.
     var pinchSize by remember { mutableStateOf<Int?>(null) }
     val size = pinchSize ?: fontSize
@@ -248,10 +271,18 @@ private fun openInBrowser(context: Context, url: String) {
             onVerticalDrag = { change, amount ->
                 change.consume(); pending -= amount
                 val lines = (pending / lineHeight).toInt()
-                if (kotlin.math.abs(lines) >= 3) { vm.scrollNative(lines); pending = 0f }
+                if (kotlin.math.abs(lines) >= 3) { vm.scrollNative(lines); reportScroll(lines < 0); pending = 0f }
             }
         )
-    } else Modifier.verticalScroll(vertical)
+    } else Modifier.nestedScroll(remember {
+        // Only the person's drags and flings arrive here; following new output scrolls without them.
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (kotlin.math.abs(available.y) > 1f) reportScroll(available.y > 0)
+                return Offset.Zero
+            }
+        }
+    }).verticalScroll(vertical)
     var viewport by remember { mutableStateOf(IntSize.Zero) }
     val pinching = pinchSize != null
     LaunchedEffect(viewport, width, lineHeight, pinching) {
@@ -304,7 +335,8 @@ private fun openInBrowser(context: Context, url: String) {
 }
 
 @SuppressLint("SetJavaScriptEnabled", "JavascriptInterface")
-@Composable fun TerminalCanvas(vm: PocketViewModel, modifier: Modifier, focus: ((() -> Unit)?) -> Unit) {
+@Composable fun TerminalCanvas(vm: PocketViewModel, modifier: Modifier, onScroll: (Boolean) -> Unit = {}, focus: ((() -> Unit)?) -> Unit) {
+    val reportScroll by rememberUpdatedState(onScroll)
     val context = LocalContext.current
     val handler = remember { Handler(Looper.getMainLooper()) }
     val webView = remember { WebView(context) }
@@ -342,6 +374,7 @@ private fun openInBrowser(context: Context, url: String) {
                 }
             }
             @JavascriptInterface fun painted(revision: Long, channel: Int, count: Int) { if (!disposed) vm.acknowledge(revision, channel, count) }
+            @JavascriptInterface fun scrolled(up: Boolean) { handler.post { if (!disposed) reportScroll(up) } }
             @JavascriptInterface fun fontSize(size: Int) { handler.post { if (!disposed) vm.setFontSize(size) } }
             // The page never navigates; links it reports are checked and handed to the browser.
             @JavascriptInterface fun openUrl(url: String, confirm: Boolean) { handler.post { if (!disposed) openLink(url, confirm) } }

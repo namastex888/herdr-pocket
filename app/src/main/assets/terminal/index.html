@@ -78,6 +78,8 @@ surface.addEventListener('touchmove',e=>{
   const lines=Math.trunc(touch.pending/cell);
   if(!lines)return;
   touch.pending-=lines*cell;
+  // Like a phone browser's toolbar: scrolling back reveals the space's tabs, scrolling on hides them.
+  const up=lines<0;if(touch.up!==up){touch.up=up;if(Pocket.scrolled)Pocket.scrolled(up)}
   if(terminal.buffer.active.type==='normal'&&terminal.modes.mouseTrackingMode==='none')terminal.scrollLines(lines);
   else terminal.element.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:lines,deltaMode:1,clientX:p.clientX,clientY:p.clientY}));
   updateLatest();
