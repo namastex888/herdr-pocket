@@ -1,7 +1,8 @@
 package ai.namastex.automagik
 
 /**
- * The options an agent waits on, read off its screen, for the notification's buttons. Pressing one sends the arrow
+ * The options an agent waits on, read off its screen, for the notification's buttons and the terminal screen's answer
+ * row. Pressing one sends the arrow
  * keys and Enter that pick it, but only after the screen is read again and still shows the same menu.
  */
 object Prompt {
@@ -40,17 +41,22 @@ object Prompt {
         return Menu(found.map { it.second.groupValues[3] }, cursor)
     }
 
+    /** The kinds of blocked agent that wait on a numbered menu. */
+    val KINDS = setOf("permission", "question")
+    /** No cap on a question's answers: the terminal screen has room for all of them, unlike a notification. */
+    const val ALL = Int.MAX_VALUE
+
     /**
      * The buttons for a [kind] of prompt: a permission gets its Yes and its No (never the "always" or mode-changing
-     * ones); a question gets up to three of its own answers (not "Type something" or "Chat about this").
+     * ones); a question gets up to [limit] of its own answers (not "Type something" or "Chat about this").
      */
-    fun choices(kind: String, menu: Menu?): List<Choice> {
+    fun choices(kind: String, menu: Menu?, limit: Int = 3): List<Choice> {
         menu ?: return emptyList()
         val all = menu.options.mapIndexed { i, label -> Choice(i, label) }
         return when (kind) {
             "permission" -> listOfNotNull(all.firstOrNull { it.label.equals("Yes", true) }, all.lastOrNull { it.label.equals("No", true) || it.label.startsWith("No,", true) || it.label.startsWith("No ", true) })
                 .takeIf { it.size == 2 }.orEmpty()
-            "question" -> all.filter { c -> FREE_TEXT.none { c.label.lowercase().startsWith(it) } }.take(3)
+            "question" -> all.filter { c -> FREE_TEXT.none { c.label.lowercase().startsWith(it) } }.take(limit)
             else -> emptyList()
         }
     }

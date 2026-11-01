@@ -412,6 +412,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
      * [options] on screen; otherwise nothing is sent. Returns what to show in the notification.
      */
     suspend fun choose(ref: TerminalRef, msg: String, options: List<String>, index: Int, label: String): String {
+        if (state.value.demo) return choosePreview(ref, msg, options, index, label)
         val c = clients[ref.hostId] ?: return "Not sent: ${hostName(ref.hostId)} isn’t connected. Open Automagik to reconnect."
         if (index !in options.indices) return "Not sent: open the agent to answer."
         return withTimeoutOrNull(8_000) {
@@ -425,6 +426,38 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
             }.getOrElse { e -> "Not sent: ${e.message ?: "the core refused it"}" }
         } ?: "Not confirmed: check the agent before trying again."
     }
+    /** The menu [ref]'s agent shows now, read off its screen as [choose] reads it, or null. */
+    suspend fun readMenu(ref: TerminalRef): Prompt.Menu? {
+        if (state.value.demo) return Prompt.menu(previewScreen(terminalOf(ref)))
+        val c = clients[ref.hostId] ?: return null
+        return try { Prompt.menu(c.call("terminal.read", JSONObject().put("terminal", ref.address).put("lines", 0)).optString("text")) }
+        catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+    }
+    /** A terminal screen's answer button: [choose], then show the outcome. [done] runs either way. */
+    fun answer(ref: TerminalRef, msg: String, options: List<String>, choice: Prompt.Choice, done: () -> Unit) {
+        viewModelScope.launch {
+            try { val outcome = choose(ref, msg, options, choice.index, choice.label); _state.update { it.copy(message = outcome) } }
+            finally { done() }
+        }
+    }
+    /** The preview has no core: its blocked agent checks the menu the same way, logs the keys it would get, and moves on. */
+    private fun choosePreview(ref: TerminalRef, msg: String, options: List<String>, index: Int, label: String): String {
+        val t = terminalOf(ref)
+        if (index !in options.indices) return "Not sent: open the agent to answer."
+        if (t == null || !t.attention || t.message != msg) return "Not sent: it isn’t asking that any more."
+        val menu = Prompt.menu(previewScreen(t))
+        if (menu == null || !Prompt.unchanged(options, menu)) return "Not sent: its options changed. Open the agent to answer."
+        android.util.Log.i("PocketPrompt", "preview ${ref.address} keys=${Prompt.keys(menu, index).joinToString(",")}")
+        _state.update { s ->
+            val m = s.machines[ref.hostId] ?: return@update s
+            val moved = m.terminals.map { if (it.address == ref.address) it.copy(status = "working", kind = "", message = "Running the test suite") else it }
+            s.copy(machines = s.machines + (ref.hostId to m.copy(terminals = moved)))
+        }
+        if (state.value.selected == ref) { if (state.value.nativeDisplay) nativeReady(cols, rows) else terminalReady(cols, rows) }
+        return "You chose: $label"
+    }
+    private fun terminalOf(ref: TerminalRef) = state.value.machines[ref.hostId]?.terminals?.find { it.address == ref.address }
+    private fun previewTerminal() = state.value.selected?.let(::terminalOf)
     /** What a notification says under its title: what the agent asks or said, and where it runs. */
     private fun detail(a: Alerts.Alert): String {
         val where = state.value.machines[a.ref.hostId]?.spaces?.find { a.ref.address in it.addresses }?.name ?: hostName(a.ref.hostId)
@@ -568,10 +601,11 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
             val rev = ++attachRevision
             resetTerminal?.invoke(rev)
             val t = state.value.machines[selected.hostId]?.terminals?.find { it.address == selected.address }
-            terminalBytes?.invoke(rev, -1, ("\u001b[38;2;127;216;234mAutomagik\u001b[0m  ·  Interface preview\r\n\r\n" +
+            terminalBytes?.invoke(rev, -1, ("\u001b[2J\u001b[H\u001b[38;2;127;216;234mAutomagik\u001b[0m  ·  Interface preview\r\n\r\n" +
                 "\u001b[38;2;166;189;145m❯\u001b[0m ${t?.agent ?: "shell"}\r\n\r\n" +
                 "  \u001b[1m${t?.title}\u001b[0m\r\n\r\n  ${t?.message ?: "Ready for your next task."}\r\n\r\n" +
-                "  This is sample output. Connect your machine for a live terminal.\r\n\r\n").toByteArray())
+                "  This is sample output. Connect your machine for a live terminal.\r\n\r\n" +
+                previewMenu(t).replace("\n", "\r\n")).toByteArray())
             _state.update { it.copy(terminalStatus = "Preview • sample output") }
             return
         }
@@ -617,7 +651,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun nativeReady(columns: Int, lines: Int) {
         if (state.value.demo) {
-            _state.update { it.copy(screenText = "Automagik · Interface preview\n\nThis is sample output.\nConnect your machine for a live terminal.", terminalStatus = "Preview • sample output") }
+            _state.update { it.copy(screenText = previewScreen(previewTerminal()), terminalStatus = "Preview • sample output") }
             return
         }
         val ref = state.value.selected ?: return
@@ -758,7 +792,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         clients.keys.toList().forEach { disconnect(it) }
         val id = "preview"
         val terminals = listOf(
-            CoreTerminal("t1", "Authentication flow", "~/work/herdr-auth", "live", "blocked", "Claude Code", "Waiting for your approval to run the test suite", 80, 24),
+            CoreTerminal("t1", "Authentication flow", "~/work/herdr-auth", "live", "blocked", "Claude Code", "Waiting for your approval to run the test suite", 80, 24, kind = "permission"),
             CoreTerminal("t2", "Android companion", "~/work/herdr", "live", "working", "Codex", "Building the mobile navigation", 80, 24),
             CoreTerminal("t3", "API review", "~/work/herdr-api", "live", "done", "Claude Code", "Reviewed 12 files · ready when you are", 80, 24),
             CoreTerminal("t4", "Shell", "~/work/website", "live", "", "zsh", "", 80, 24),
@@ -779,3 +813,21 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     fun hostName(hostId: String) = if (state.value.demo) "Preview machine" else state.value.hosts.find { it.id == hostId }?.name ?: "Machine"
     override fun onCleared() { if (current === this) current = null; discovery.stop(); clients.values.forEach { it.close() }; clients.clear() }
 }
+
+/** The preview's sample screen for [t]: a header, and the menu its blocked agent waits on (synthetic). */
+internal fun previewScreen(t: CoreTerminal?) = "Automagik  ·  Interface preview\n\n❯ ${t?.agent ?: "shell"}\n\n  ${t?.title}\n\n" +
+    "  ${t?.message ?: "Ready for your next task."}\n\n  This is sample output. Connect your machine for a live terminal.\n\n" + previewMenu(t)
+
+/** A permission shaped like Claude Code's, for the preview's agent that is blocked on one. */
+internal fun previewMenu(t: CoreTerminal?) = if (t?.attention != true || t.kind != "permission") "" else """
+⏺ Bash(npm test)
+────────────────────────────────────────
+ Bash command
+   npm test
+   Run the test suite
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don’t ask again for npm test commands in this project
+   3. No, and tell Claude what to do differently (esc)
+ Esc to cancel
+""".trimStart()

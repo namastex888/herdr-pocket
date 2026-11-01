@@ -81,4 +81,58 @@ Enter to select · ↑/↓ to navigate · Esc to cancel
         assertFalse(Prompt.unchanged(then, Prompt.menu(permission)))
         assertFalse(Prompt.unchanged(then, null))
     }
+
+    /** The same permission with the cursor where Claude Code puts it first: on 1. Yes. */
+    private val permissionAtYes = permission.replace(" ❯ 2.", "   2.").replace("   1. Yes", " ❯ 1. Yes")
+
+    @Test fun keysFollowTheCursorWhereverItIs() {
+        val atYes = Prompt.menu(permissionAtYes)!!
+        assertEquals(0, atYes.cursor)
+        assertEquals(listOf("enter"), Prompt.keys(atYes, 0))
+        assertEquals(listOf("down", "down", "down", "enter"), Prompt.keys(atYes, 3))
+        val atNo = Prompt.menu(permission.replace(" ❯ 2.", "   2.").replace("   4. No", " ❯ 4. No"))!!
+        assertEquals(3, atNo.cursor)
+        assertEquals(listOf("up", "up", "up", "enter"), Prompt.keys(atNo, 0))
+        // A question with its cursor in the middle moves both ways.
+        val middle = Prompt.menu(question.replace("❯ 1. Red", "  1. Red").replace("  2. Green", "❯ 2. Green"))!!
+        assertEquals(1, middle.cursor)
+        assertEquals(listOf("up", "enter"), Prompt.keys(middle, 0))
+        assertEquals(listOf("down", "enter"), Prompt.keys(middle, 2))
+    }
+
+    @Test fun theButtonsAreTheSameWhereverTheCursorIs() {
+        assertEquals(Prompt.choices("permission", Prompt.menu(permission)), Prompt.choices("permission", Prompt.menu(permissionAtYes)))
+    }
+
+    @Test fun onTheTerminalScreenAQuestionOffersAllItsOwnAnswers() {
+        val five = Prompt.Menu(listOf("Red", "Green", "Blue", "Black", "Type something.", "Chat about this"), 0)
+        assertEquals(listOf("Red", "Green", "Blue"), Prompt.choices("question", five).map { it.label })
+        assertEquals(listOf(0, 1, 2, 3), Prompt.choices("question", five, limit = Prompt.ALL).map { it.index })
+        // A permission still offers only its Yes and No there.
+        assertEquals(listOf("Yes", "No"), Prompt.choices("permission", Prompt.menu(permission), limit = Prompt.ALL).map { it.label })
+    }
+
+    @Test fun aMenuThatChangedBetweenTapAndSendIsNotPressed() {
+        val tapped = Prompt.menu(permission)!!.options
+        // The agent moved on to a question, or redrew its permission with other options, before the keys went out.
+        assertFalse(Prompt.unchanged(tapped, Prompt.menu(question)))
+        val other = permission.replace("   3. Yes, and switch to auto mode · auto mode handles these prompts for you\n", "").replace("   4. No", "   3. No")
+        assertEquals(listOf("Yes", "Yes, and always allow access to /work/example from this project", "No"), Prompt.menu(other)!!.options)
+        assertFalse(Prompt.unchanged(tapped, Prompt.menu(other)))
+        assertFalse(Prompt.unchanged(tapped, Prompt.menu("⏺ Running the tests…\n")))
+        // Only the cursor moved: the same menu, so the keys are worked out from where it is now.
+        val now = Prompt.menu(permissionAtYes)
+        assertTrue(Prompt.unchanged(tapped, now))
+        assertEquals(listOf("down", "down", "down", "enter"), Prompt.keys(now!!, 3))
+    }
+
+    @Test fun thePreviewAgentAsksAPermissionTheButtonsCanAnswer() {
+        val asking = CoreTerminal("t1", "Auth", "~/work", "live", "blocked", "Claude Code", "Waiting", 80, 24, kind = "permission")
+        val menu = Prompt.menu(previewScreen(asking))!!
+        assertEquals(0, menu.cursor)
+        assertEquals(listOf(0 to "Yes", 2 to "No, and tell Claude what to do differently (esc)"),
+            Prompt.choices("permission", menu).map { it.index to it.label })
+        // Once it moves on, its screen has no menu and the buttons go.
+        assertNull(Prompt.menu(previewScreen(asking.copy(status = "working", kind = ""))))
+    }
 }

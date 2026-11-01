@@ -157,7 +157,16 @@ try:
             + 'and \x1b]8;;javascript:alert(1)\x1b\\this\x1b]8;;\x1b\\ too\r\n')
         assert links.evaluate('tapCell(0, 10)') is False, 'a tap on a link must not reach the terminal'
         assert links.evaluate('window.__links') == [['https://a.dev/pull/2', False]]
-        assert links.evaluate('tapCell(0, 2)') is True and links.evaluate('window.__links') == []
+        # Any other tap is kept from xterm too: its mousedown focuses the textarea, which raises the soft keyboard.
+        assert links.evaluate('tapCell(0, 2)') is False and links.evaluate('window.__links') == []
+        # A program that tracks the mouse still gets the tap as a click, and the textarea still isn't focused.
+        links.evaluate("() => new Promise(done => terminal.write('\\x1b[?1000h\\x1b[?1006h', done))")
+        links.evaluate('window.__keys=[]; tapCell(0, 2)')
+        clicks = b''.join(base64.b64decode(s) for s in links.evaluate('window.__keys'))
+        assert b'\x1b[<0;3;1M' in clicks and b'\x1b[<0;3;1m' in clicks, clicks
+        assert links.evaluate('document.activeElement !== terminal.textarea')
+        links.evaluate("() => new Promise(done => terminal.write('\\x1b[?1000l\\x1b[?1006l', done))")
+        links.evaluate('window.__keys=[]')
         links.evaluate('tapCell(0, 25)')
         assert links.evaluate('window.__links') == [], 'punctuation after the link is not part of it'
         # A link the terminal wrapped, tapped on its second row.

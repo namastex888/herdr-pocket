@@ -101,8 +101,10 @@ import kotlin.math.roundToInt
                 if (state.nativeDisplay) NativeTerminal(vm, state.screenText, state.nativeAlternateScreen, state.fontSize, Modifier.fillMaxWidth().weight(1f), onScroll)
                 else TerminalCanvas(vm, Modifier.fillMaxWidth().weight(1f), onScroll) { focusTerminal = it }
             }
+            val keys = !offline && (!fullscreen || controls || keyboardVisible || showComposer)
+            if (!offline) PromptChoices(vm, ref, terminal, bottom = !keys && fullscreen && !controls)
             if (offline) OfflineStrip(vm.hostName(ref.hostId), machine?.connecting == true) { vm.reconnect(ref.hostId) }
-            if (!offline && (!fullscreen || controls || keyboardVisible || showComposer)) TerminalKeys(vm, state)
+            if (keys) TerminalKeys(vm, state)
             if (showComposer) Row(Modifier.fillMaxWidth().background(Chrome).padding(10.dp, 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(message, { message = it }, placeholder = { Text("Message this agent…", fontSize = 12.sp) }, modifier = Modifier.weight(1f).focusRequester(composerFocus), maxLines = 4, shape = RoundedCornerShape(12.dp))
                 IconButton(onClick = { val draft = message; vm.sendMessage(draft) { if (message == draft) message = "" } }, enabled = message.isNotBlank() && !state.demo && !state.sending && state.terminalStatus.startsWith("Live")) {
@@ -159,6 +161,43 @@ import kotlin.math.roundToInt
         currentTab.terminals.forEach { address ->
             val t = state.machines[ref.hostId]?.terminals?.find { it.address == address }
             FilterChip(selected = address == ref.address, onClick = { vm.selectTerminal(TerminalRef(ref.hostId, address)) }, label = { Text(t?.title ?: address, fontSize = 10.sp) })
+        }
+    }
+}
+
+/**
+ * While the agent is blocked on a menu (a permission or a question), its answers as buttons under the terminal, so
+ * answering never depends on hitting a line of the screen. A press goes through [PocketViewModel.choose], which reads
+ * the screen again and sends the keys only if the same menu is still there. The row goes when the menu does.
+ */
+@Composable private fun PromptChoices(vm: PocketViewModel, ref: TerminalRef, terminal: CoreTerminal?, bottom: Boolean) {
+    val kind = terminal?.kind.orEmpty()
+    val msg = terminal?.message.orEmpty()
+    val asking = terminal?.attention == true && kind in Prompt.KINDS
+    var menu by remember(ref) { mutableStateOf<Prompt.Menu?>(null) }
+    var sending by remember(ref) { mutableStateOf(false) }
+    var reread by remember(ref) { mutableIntStateOf(0) }
+    LaunchedEffect(ref, asking, kind, msg, terminal?.turn, reread) {
+        if (!asking) { menu = null; return@LaunchedEffect }
+        // The prompt may draw a moment after the status, and the person may move its cursor or answer by keys.
+        while (true) { menu = vm.readMenu(ref); delay(1_500) }
+    }
+    val shown = menu?.takeIf { asking } ?: return
+    val choices = Prompt.choices(kind, shown, limit = Prompt.ALL)
+    if (choices.isEmpty()) return
+    Row(Modifier.fillMaxWidth().background(Chrome).then(if (bottom) Modifier.navigationBarsPadding() else Modifier)
+        .horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(if (kind == "permission") "Allow?" else "Answer", color = Muted, fontSize = 12.sp)
+        choices.forEachIndexed { i, choice ->
+            Button(onClick = { sending = true; vm.answer(ref, msg, shown.options, choice) { sending = false; reread++ } },
+                enabled = !sending, shape = RoundedCornerShape(10.dp), contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                modifier = Modifier.heightIn(min = 44.dp),
+                colors = if (i == 0) ButtonDefaults.buttonColors(containerColor = Accent, contentColor = OnAccent)
+                    else ButtonDefaults.buttonColors(containerColor = Raised, contentColor = Ink)) {
+                Text("${choice.index + 1}. ${choice.label}", fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 260.dp))
+            }
         }
     }
 }
