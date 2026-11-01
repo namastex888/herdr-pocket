@@ -178,6 +178,41 @@ fn bump_mtime(p: &std::path::Path, secs: u64) {
 }
 
 #[test]
+fn truncated_below_the_offset_with_an_unchanged_head_is_read_again() {
+    let env = Env::new();
+    let f = env.claude("-work-app/sess-1.jsonl");
+    let lines: Vec<String> = (0..10)
+        .map(|i| {
+            claude_line(
+                &format!("msg_{i}"),
+                &format!("req_{i}"),
+                TS,
+                "model-a",
+                &U1,
+                200,
+            )
+        })
+        .collect();
+    write_lines(&f, &lines);
+    env.run(&env.opts());
+    // Cut back to 8 lines (the first 4 KB are unchanged), then a new message.
+    let mut kept = lines[..8].to_vec();
+    kept.push(claude_line("msg_x", "req_x", TS, "model-a", &U2, 0));
+    assert!(kept.join("\n").len() > 4096 && kept.join("\n").len() < lines.join("\n").len());
+    write_lines(&f, &kept);
+    bump_mtime(&f, 5);
+    let r = env.run(&env.opts());
+    assert_eq!(r.health.rewrites, 1);
+    assert_eq!(r.health.events, 1);
+    let mut want = Tokens::default();
+    for _ in 0..10 {
+        want.add(&U1.tokens());
+    }
+    want.add(&U2.tokens());
+    assert_eq!(env.totals()["model-a"], want);
+}
+
+#[test]
 fn rewritten_and_truncated_files_are_detected_and_not_double_counted() {
     let env = Env::new();
     let f = env.claude("-work-app/sess-1.jsonl");
@@ -247,6 +282,50 @@ fn budget_stop_resumes_without_double_counting() {
     assert_eq!(env.totals()["model-a"], want);
     // Complete and fresh now: the next run does nothing.
     assert!(matches!(sync::run(&o).unwrap(), Outcome::Fresh { .. }));
+}
+
+#[test]
+fn omp_title_edits_in_place_are_not_rewrites() {
+    let env = Env::new();
+    let f = env.omp("-work-app/2026-01-15_sess.jsonl");
+    let title = |t: &str, pad: usize| {
+        format!(
+            r#"{{"type":"title","v":1,"title":"{t}","pad":"{}"}}"#,
+            " ".repeat(pad)
+        )
+    };
+    let session = r#"{"type":"session","version":3,"id":"omp-sess-2","timestamp":"2026-01-15T09:00:00Z","cwd":"/work/app"}"#;
+    let msg = |id: &str| {
+        format!(
+            r#"{{"type":"message","id":"{id}","timestamp":"2026-01-15T10:01:00Z","message":{{"role":"assistant","model":"model-o","usage":{{"input":10,"output":20,"cacheRead":30,"cacheWrite":0,"totalTokens":60,"cost":{{"total":0.01}}}}}}}}"#
+        )
+    };
+    let body = |t: String, ids: &[&str]| {
+        let mut v = vec![t, session.to_string()];
+        v.extend(ids.iter().map(|i| msg(i)));
+        v
+    };
+    write_lines(&f, &body(title("FAKE-A", 20), &["e1"]));
+    env.run(&env.opts());
+    // omp renames the session: same line length (the pad shrinks), then appends.
+    write_lines(&f, &body(title("FAKE-RENAMED", 14), &["e1", "e2"]));
+    bump_mtime(&f, 5);
+    let r = env.run(&env.opts());
+    assert_eq!(
+        r.health.rewrites, 0,
+        "a same-length title edit is not a rewrite"
+    );
+    assert_eq!(r.health.events, 1);
+    // A longer title shifts every offset: that is a rewrite, and the dedupe set absorbs it.
+    write_lines(
+        &f,
+        &body(title("FAKE-A-MUCH-LONGER-TITLE", 40), &["e1", "e2", "e3"]),
+    );
+    bump_mtime(&f, 10);
+    let r = env.run(&env.opts());
+    assert_eq!(r.health.rewrites, 1);
+    assert_eq!(r.health.events, 1);
+    assert_eq!(env.totals()["model-o"].total(), 180);
 }
 
 #[test]
@@ -452,4 +531,52 @@ fn the_first_run_imports_14_days_and_backfill_imports_the_rest() {
     assert!(r.reimported);
     assert_eq!(r.counted_from_ms, 0);
     assert_eq!(env.totals()["model-a"], sum(&[&U1, &U2]));
+}
+
+#[test]
+fn a_chunk_commits_its_rows_keys_and_offset_together() {
+    use meter::event::{Precision, RollupKey};
+    use meter::store::{Attributed, FileState, Health, Store};
+    let mut store = Store::open_in_memory().unwrap();
+    let file = FileState {
+        path: "/logs/a.jsonl".into(),
+        source: "claude-code".into(),
+        offset: 4096,
+        ..Default::default()
+    };
+    let event = Attributed {
+        dedupe_key: "claude|msg_1|req_1".into(),
+        key: RollupKey {
+            bot: None,
+            role: None,
+            harness: "claude-code".into(),
+            model: "model-a".into(),
+            machine: "m".into(),
+            repo: None,
+            branch: None,
+            hour_ms: 0,
+        },
+        squad: None,
+        tokens: U1.tokens(),
+        precision: Precision::Exact,
+        reported_usd: None,
+        session: None,
+        parent_session: None,
+        ts_ms: 0,
+    };
+    store
+        .apply_chunk(&file, std::slice::from_ref(&event), Health::default(), 1)
+        .unwrap();
+    assert_eq!(
+        store.file("/logs/a.jsonl").unwrap().unwrap().offset,
+        4096,
+        "the offset is saved with the rows"
+    );
+    assert_eq!(store.count("seen").unwrap(), 1);
+    // Applying the same chunk again adds nothing.
+    let h = store
+        .apply_chunk(&file, &[event], Health::default(), 2)
+        .unwrap();
+    assert_eq!((h.events, h.duplicates), (0, 1));
+    assert_eq!(store.rows_since(i64::MIN).unwrap()[0].tokens, U1.tokens());
 }

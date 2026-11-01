@@ -36,6 +36,8 @@ pub struct FileState {
     pub size: u64,
     pub mtime_ms: i64,
     pub offset: u64,
+    /// Bytes before the hashed head (omp rewrites its first line, the title, in place).
+    pub head_skip: u64,
     pub head_len: u64,
     pub head_hash: String,
     pub ctx: FileCtx,
@@ -109,7 +111,8 @@ CREATE INDEX IF NOT EXISTS usage_hour ON usage(hour_ms);
 CREATE TABLE IF NOT EXISTS files (
   path TEXT PRIMARY KEY, source TEXT NOT NULL,
   dev INTEGER NOT NULL, ino INTEGER NOT NULL, size INTEGER NOT NULL, mtime_ms INTEGER NOT NULL,
-  offset INTEGER NOT NULL, head_len INTEGER NOT NULL, head_hash TEXT NOT NULL,
+  offset INTEGER NOT NULL, head_skip INTEGER NOT NULL DEFAULT 0,
+  head_len INTEGER NOT NULL, head_hash TEXT NOT NULL,
   ctx TEXT NOT NULL DEFAULT '{}', rewrites INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS seen (k INTEGER PRIMARY KEY, seq INTEGER NOT NULL);
@@ -156,6 +159,17 @@ impl Store {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.execute_batch(SCHEMA)?;
+        // Stores made before `head_skip` existed.
+        let has_skip: bool = conn.query_row(
+            "SELECT count(*) > 0 FROM pragma_table_info('files') WHERE name = 'head_skip'",
+            [],
+            |r| r.get(0),
+        )?;
+        if !has_skip {
+            conn.execute_batch(
+                "ALTER TABLE files ADD COLUMN head_skip INTEGER NOT NULL DEFAULT 0",
+            )?;
+        }
         let s = Store { conn };
         if s.meta("schema_version")?.is_none() {
             s.set_meta("schema_version", &SCHEMA_VERSION.to_string())?;
@@ -196,7 +210,7 @@ impl Store {
     pub fn file(&self, path: &str) -> rusqlite::Result<Option<FileState>> {
         self.conn
             .query_row(
-                "SELECT path, source, dev, ino, size, mtime_ms, offset, head_len, head_hash, ctx, rewrites
+                "SELECT path, source, dev, ino, size, mtime_ms, offset, head_len, head_hash, ctx, rewrites, head_skip
                  FROM files WHERE path = ?1",
                 [path],
                 |r| {
@@ -213,6 +227,7 @@ impl Store {
                         head_hash: r.get(8)?,
                         ctx: serde_json::from_str(&ctx).unwrap_or_default(),
                         rewrites: r.get(10)?,
+                        head_skip: r.get::<_, i64>(11)? as u64,
                     })
                 },
             )
@@ -398,11 +413,11 @@ impl Store {
 fn put_file(tx: &Transaction<'_>, f: &FileState) -> rusqlite::Result<()> {
     let ctx = serde_json::to_string(&f.ctx).unwrap_or_else(|_| "{}".into());
     tx.prepare_cached(
-        "INSERT INTO files(path, source, dev, ino, size, mtime_ms, offset, head_len, head_hash, ctx, rewrites)
-         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        "INSERT INTO files(path, source, dev, ino, size, mtime_ms, offset, head_len, head_hash, ctx, rewrites, head_skip)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
          ON CONFLICT(path) DO UPDATE SET source = excluded.source, dev = excluded.dev, ino = excluded.ino,
            size = excluded.size, mtime_ms = excluded.mtime_ms, offset = excluded.offset,
-           head_len = excluded.head_len, head_hash = excluded.head_hash, ctx = excluded.ctx,
+           head_len = excluded.head_len, head_hash = excluded.head_hash, head_skip = excluded.head_skip, ctx = excluded.ctx,
            rewrites = excluded.rewrites",
     )?
     .execute(params![
@@ -416,7 +431,8 @@ fn put_file(tx: &Transaction<'_>, f: &FileState) -> rusqlite::Result<()> {
         f.head_len as i64,
         f.head_hash,
         ctx,
-        f.rewrites
+        f.rewrites,
+        f.head_skip as i64
     ])?;
     Ok(())
 }

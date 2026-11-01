@@ -104,11 +104,30 @@ pub fn parent_session(path: &Path) -> Option<String> {
     Some(s.chars().take(128).collect())
 }
 
-fn head_hash(f: &mut File, len: u64) -> io::Result<String> {
+fn head_hash(f: &mut File, skip: u64, len: u64) -> io::Result<String> {
     let mut buf = vec![0u8; len as usize];
-    f.seek(SeekFrom::Start(0))?;
+    f.seek(SeekFrom::Start(skip))?;
     f.read_exact(&mut buf)?;
     Ok(hex(&Sha256::digest(&buf)[..16]))
+}
+
+/// Where the identifying head starts. omp rewrites its first line (a padded title) in place, so its
+/// head starts after that line; None while that line is still incomplete.
+fn head_skip(f: &mut File, source: Source) -> io::Result<Option<u64>> {
+    if source != Source::Omp {
+        return Ok(Some(0));
+    }
+    let mut buf = vec![0u8; 64 * 1024];
+    f.seek(SeekFrom::Start(0))?;
+    let mut n = 0;
+    while n < buf.len() {
+        let k = f.read(&mut buf[n..])?;
+        if k == 0 {
+            break;
+        }
+        n += k;
+    }
+    Ok(memchr::memchr(b'\n', &buf[..n]).map(|i| i as u64 + 1))
 }
 
 fn open_nofollow(p: &Path) -> io::Result<File> {
@@ -149,6 +168,7 @@ pub fn plan(c: &Candidate, prev: Option<FileState>) -> io::Result<Plan> {
         size: 0,
         mtime_ms: c.mtime_ms,
         offset: 0,
+        head_skip: 0,
         head_len: 0,
         head_hash: String::new(),
         ctx: match parent_session(&c.path) {
@@ -175,10 +195,11 @@ pub fn plan(c: &Candidate, prev: Option<FileState>) -> io::Result<Plan> {
     if same_file && p.size == c.size && p.mtime_ms == c.mtime_ms {
         return Ok(Plan::Unchanged);
     }
-    let mut intact = same_file && c.size >= p.offset && c.size >= p.head_len;
+    let mut intact = same_file && c.size >= p.offset && c.size >= p.head_skip + p.head_len;
     if intact && p.head_len > 0 {
         let mut f = open_nofollow(&c.path)?;
-        intact = head_hash(&mut f, p.head_len)? == p.head_hash;
+        intact = head_skip(&mut f, c.source)? == Some(p.head_skip)
+            && head_hash(&mut f, p.head_skip, p.head_len)? == p.head_hash;
     }
     if !intact {
         return Ok(Plan::Read {
@@ -238,9 +259,18 @@ where
 {
     let mut f = open_nofollow(Path::new(&state.path))?;
     let size_now = f.metadata()?.len();
-    if state.head_len < HEAD_BYTES.min(size_now) {
-        state.head_len = HEAD_BYTES.min(size_now);
-        state.head_hash = head_hash(&mut f, state.head_len)?;
+    let skip = if state.head_len == 0 {
+        head_skip(&mut f, source)?
+    } else {
+        Some(state.head_skip)
+    };
+    if let Some(skip) = skip {
+        let avail = size_now.saturating_sub(skip);
+        if state.head_len < HEAD_BYTES.min(avail) {
+            state.head_skip = skip;
+            state.head_len = HEAD_BYTES.min(avail);
+            state.head_hash = head_hash(&mut f, skip, state.head_len)?;
+        }
     }
     f.seek(SeekFrom::Start(state.offset))?;
     let mut out = ReadOutcome::default();
