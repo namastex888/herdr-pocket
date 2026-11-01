@@ -100,6 +100,7 @@ phone. No picture is stored or sent.
 | Internet | Connect to your machines, Pocket Link relays, and GitHub for updates |
 | Notifications | Alert you when an agent needs you or finishes |
 | Foreground service (special use) | **Watch in background**: keep connections open while you're away, with a "Watching" notification you can stop |
+| Run at startup | **Watch in background**: after the phone restarts and you unlock it, reconnect the machines it was watching, only if watching was on ([RFC 0007](rfcs/0007-watch-after-reboot.md)) |
 | Microphone | Speak a message in the side-button panel |
 | Camera | Scan the pairing QR code (added by the ZXing scanner library) |
 | Install packages, update without asking again | Install updates from GitHub releases; Android asks once |

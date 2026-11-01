@@ -2,6 +2,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- After the phone restarts and is unlocked: bring Watch in background back if it was on (WatchResumeReceiver). -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Speaking a message in the assistant panel. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
@@ -35,9 +37,13 @@
         <service android:name=".WatchService" android:exported="false" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Keeps the user's connections to their own computers open so a coding agent that needs them or finishes reaches them as a notification they can reply to." />
         </service>
-        <!-- An update, from GitHub or Play, ends the process: this brings Watch in background back if it was on. -->
+        <!-- An update, from GitHub or Play, or a phone restart ends the process: this brings Watch in background back if it
+             was on. BOOT_COMPLETED comes after the first unlock, when the keys and preferences can be read. -->
         <receiver android:name=".WatchResumeReceiver" android:exported="false">
-            <intent-filter><action android:name="android.intent.action.MY_PACKAGE_REPLACED" /></intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
         </receiver>
     </application>
 </manifest>
