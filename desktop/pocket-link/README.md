@@ -88,8 +88,9 @@ user can read the file.
 }
 ```
 
-- `schema`: 1. A later schema that breaks readers gets another number; treat any other value as
-  unknown.
+- `schema`: 1. A new field can be added within schema 1, so ignore fields you don't know. Removing
+  or renaming a field, or changing its type or meaning, takes a new number: treat any value but 1
+  as unknown.
 - `running`: the bridge is serving. A clean stop (**Turn off**, `bridge.mjs stop`, logout) writes
   `false`, with no phones.
 - `updated`: when it was written, in epoch milliseconds. While it runs, the bridge rewrites it at

@@ -16,5 +16,6 @@ Write one from [`_Templates/decision.md`](../_Templates/decision.md).
 | [Answering from the lock screen starts off](lock-screen-answers-off.md) | Implemented | #19 |
 | [Updates install silently, and notifications say so](updates-install-silently.md) | Implemented | |
 | [Pocket Link keeps its state outside the mod folder](pocket-link-state-outside-mod.md) | Implemented | #34 |
+| [Pocket Link public-status.json contract (schema 1)](pocket-link-public-status.md) | Accepted | #39 |
 
 Back to the [docs home](../_index.md).
