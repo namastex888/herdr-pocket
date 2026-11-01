@@ -1,0 +1,6 @@
+{
+  "global": {
+    "cmd-alt-p": "mod.open:pocket-link",
+    "ctrl-alt-p": "mod.open:pocket-link"
+  }
+}

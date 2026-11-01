@@ -34,6 +34,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Build debug APK, run unit tests and lint
+        working-directory: android
         run: ./gradlew --stacktrace :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
 
       - name: Name APK
@@ -41,7 +42,7 @@ jobs:
         run: |
           version=$(scripts/version.sh current)
           name="automagik-${version}-${GITHUB_SHA::7}-debug.apk"
-          cp app/build/outputs/apk/debug/app-debug.apk "$name"
+          cp android/app/build/outputs/apk/debug/app-debug.apk "$name"
           echo "name=$name" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
@@ -55,8 +56,8 @@ jobs:
         with:
           name: reports
           path: |
-            app/build/reports/
-            app/build/test-results/
+            android/app/build/reports/
+            android/app/build/test-results/
           if-no-files-found: ignore
 
   terminal:
@@ -72,5 +73,5 @@ jobs:
         run: |
           python -m pip install playwright
           python -m playwright install --with-deps chromium
-      - run: python scripts/test_terminal.py
+      - run: python android/scripts/test_terminal.py
 

@@ -52,14 +52,15 @@ Tap **…** in the upper-right of a terminal to reveal its controls. The keyboar
 
 ## Build
 
-Requirements: JDK 17, Android SDK platform 35 and build-tools 35.0.0.
+Requirements: JDK 17, Android SDK platform 35 and build-tools 35.0.0. The Gradle project is in `android/`.
 
 ```sh
+cd android
 printf 'sdk.dir=/absolute/path/to/Android/Sdk\n' > local.properties
 ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
 ```
 
-Install `app/build/outputs/apk/debug/app-debug.apk`. GitHub Actions (`.github/workflows/android.yml`) runs the same build, tests and lint, plus the terminal page checks, on every pull request and push to `main`. It requires Android 8.0/API 26 or newer, with app ID `ai.namastex.automagik`. Source includes a Gradle wrapper pinned to its distribution checksum.
+Install `android/app/build/outputs/apk/debug/app-debug.apk`. GitHub Actions (`.github/workflows/android.yml`) runs the same build, tests and lint, plus the terminal page checks, on every pull request and push to `main`. It requires Android 8.0/API 26 or newer, with app ID `ai.namastex.automagik`. Source includes a Gradle wrapper pinned to its distribution checksum.
 
 ### Install and update
 
@@ -74,10 +75,11 @@ The version code is the commit's time in minutes since 2025, so each build on `m
 Protocol integration tests can use a real core without touching your installed session:
 
 ```sh
+cd android
 HERDR_TEST_HC=/absolute/path/to/hc ./gradlew :app:testDebugUnitTest --rerun
 ```
 
-Tests select unique core sessions and temporary XDG state/config/runtime directories, and stop only those scratch cores. `scripts/ssh_test_host.py` is an optional loopback-only fixture for SSH verification (requires Python Paramiko). It is not needed by the app.
+Tests select unique core sessions and temporary XDG state/config/runtime directories, and stop only those scratch cores. `android/scripts/ssh_test_host.py` is an optional loopback-only fixture for SSH verification (requires Python Paramiko). It is not needed by the app.
 
 ## Current limits
 
@@ -89,9 +91,9 @@ Tests select unique core sessions and temporary XDG state/config/runtime directo
 - A phone attach can resize the same terminal shown on the desktop; herdr-core gives the last active viewer control of its size.
 - The phone's private key is stored in Android app-private, no-backup storage. Uninstalling loses it. This prototype does not offer key backup or hardware-backed SSH signing. Backups and device transfers of app data are disabled.
 
-Optional terminal regression checks: install Python Playwright and Chromium, then run `python scripts/test_terminal.py`. These cover zero-height parents, keyboard resizing/input, touch scrolling in history and alternate-screen programs, preserving scroll position on output, returning to the latest output, and pinch-to-resize text.
+Optional terminal regression checks: install Python Playwright and Chromium, then run `python android/scripts/test_terminal.py`. These cover zero-height parents, keyboard resizing/input, touch scrolling in history and alternate-screen programs, preserving scroll position on output, returning to the latest output, and pinch-to-resize text.
 
-The terminal assets are already bundled; Node is not needed for an Android build. To refresh those pinned assets, run `scripts/vendor-terminal.sh` with npm available. The script transpiles xterm for older Android WebViews.
+The terminal assets are already bundled; Node is not needed for an Android build. To refresh those pinned assets, run `android/scripts/vendor-terminal.sh` with npm available. The script transpiles xterm for older Android WebViews.
 
 ## Source map
 

@@ -1,0 +1,7 @@
+.state/
+node_modules/
+.setup.log
+.setup.done
+# Herdr writes these for editors
+gpui-kit.d.ts
+jsconfig.json

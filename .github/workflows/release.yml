@@ -60,6 +60,7 @@ jobs:
 
       - name: The gates the release stands on
         if: steps.new.outputs.release == 'true'
+        working-directory: android
         run: ./gradlew --stacktrace :app:testDebugUnitTest :app:lintDebug
 
       - name: Version, commit and tag
@@ -113,6 +114,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Build the release APK
+        working-directory: android
         env:
           KEYSTORE: ${{ secrets.POCKET_SIGNING_KEYSTORE }}
           POCKET_SIGNING_PASSWORD: ${{ secrets.POCKET_SIGNING_PASSWORD }}
@@ -132,11 +134,11 @@ jobs:
         run: |
           set -euo pipefail
           tag="v${VERSION}"
-          meta=app/build/outputs/apk/release/output-metadata.json
+          meta=android/app/build/outputs/apk/release/output-metadata.json
           code=$(jq -r '.elements[0].versionCode' "$meta")
           name=$(jq -r '.elements[0].versionName' "$meta")
           [ "$name" = "$VERSION" ] || { echo "::error::the APK says ${name}, the tag says ${VERSION}"; exit 1; }
-          cp app/build/outputs/apk/release/app-release.apk automagik.apk
+          cp android/app/build/outputs/apk/release/app-release.apk automagik.apk
           sha=$(sha256sum automagik.apk | cut -d' ' -f1)
           # What shipped: the conventional subjects since the previous release, without the release commits.
           changes=$(git log --no-merges --format='- %s' "${PREVIOUS:+${PREVIOUS}..}${tag}" | grep -vE '^- chore\(release\)' | head -40 || true)
