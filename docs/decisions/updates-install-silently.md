@@ -43,7 +43,7 @@ Android notifications replace the in-app "update available" bar.
   preferences (`watched_hosts`,
   `android/app/src/main/java/ai/namastex/automagik/PocketViewModel.kt:367`).
   A machine connected with a typed password isn't kept, because the password isn't.
-- `WatchResumeReceiver` (`WatchResume.kt:37`, manifest `AndroidManifest.xml:31`) wakes on
+- `WatchResumeReceiver` (`WatchResume.kt:37`, manifest `AndroidManifest.xml:37`) wakes on
   `MY_PACKAGE_REPLACED`, so it runs for any update source, GitHub or Play. It lives in `src/main`,
   apart from the updater. It starts the watch service and reconnects those machines
   (`PocketViewModel.kt:380`). The decision is unit tested in `WatchResumeTest.kt`.
