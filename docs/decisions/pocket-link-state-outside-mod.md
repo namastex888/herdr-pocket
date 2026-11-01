@@ -4,7 +4,7 @@ type: decision
 status: Implemented
 created: 2026-11-01
 updated: 2026-11-01
-pr: ""
+pr: "#34"
 tags: [decisions, pocket-link, desktop]
 ---
 # Pocket Link keeps its state outside the mod folder

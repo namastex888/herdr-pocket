@@ -12,7 +12,7 @@
 // No dependencies, so node --test runs it without the bridge's packages.
 import { createHash } from 'node:crypto'
 import { chmodSync, constants, copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs'
-import { isAbsolute, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 
 export const NAME = 'automagik-pocket-link'
 export const KEY = 'secret.key'
@@ -80,6 +80,8 @@ const defaultAlive = (pid) => { try { process.kill(pid, 0); return true } catch 
  */
 export function open({ env = {}, home, modRoot, pid = process.pid, alive = defaultAlive, log = () => {} }) {
   const dir = stateDir({ env, home })
+  // Parents (~/.local/state) at the usual mode; only this folder is 0700.
+  mkdirSync(dirname(dir), { recursive: true })
   mkdirSync(dir, { recursive: true, mode: 0o700 })
   chmodSync(dir, 0o700)
   const old = join(modRoot, '.state')
