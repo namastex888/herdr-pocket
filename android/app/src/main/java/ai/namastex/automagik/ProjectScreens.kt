@@ -31,13 +31,13 @@ private fun word(rank: Int) = when (rank) { Cockpit.BLOCKED -> "blocked"; Cockpi
 private fun plural(n: Int, one: String, many: String = "${one}s") = "$n ${if (n == 1) one else many}"
 
 /** Projects: one card per repository, or the desktop's spaces tree as its sidebar draws it. */
-@Composable fun ProjectsScreen(state: PocketState, vm: PocketViewModel, pulse: Projects.Pulse, rows: List<SidebarRow>) {
-    var tree by rememberSaveable { mutableStateOf(false) }
+@Composable fun ProjectsScreen(state: PocketState, vm: PocketViewModel, pulse: Projects.Pulse, rows: List<SidebarRow>,
+                               tree: Boolean, onTree: (Boolean) -> Unit) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 28.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item(key = "views") {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Pill("By repository", !tree) { tree = false }
-                Pill("Spaces", tree) { tree = true }
+                Pill("By repository", !tree) { onTree(false) }
+                Pill("Spaces", tree) { onTree(true) }
             }
         }
         if (tree) {
@@ -139,18 +139,17 @@ private fun LazyListScope.agentCards(state: PocketState, vm: PocketViewModel, ag
 }
 
 /** Tasks: every project's branches by status, Needs you first, with a project filter. */
-@Composable fun TasksScreen(state: PocketState, vm: PocketViewModel, pulse: Projects.Pulse) {
-    var filter by rememberSaveable { mutableStateOf<String?>(null) }
+@Composable fun TasksScreen(vm: PocketViewModel, pulse: Projects.Pulse, filter: String?, onFilter: (String?) -> Unit) {
     var idle by rememberSaveable { mutableStateOf(false) }
     val tasks = pulse.tasks.filter { filter == null || it.project == filter }
     val board = Projects.board(tasks)
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 28.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item(key = "filter") {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Pill("All ${pulse.tasks.size}", filter == null) { filter = null }
+                Pill("All ${pulse.tasks.size}", filter == null) { onFilter(null) }
                 pulse.projects.forEach { p ->
                     val n = pulse.tasks.count { it.project == p.key }
-                    if (n > 0) Pill("${p.name} $n", filter == p.key) { filter = p.key }
+                    if (n > 0) Pill("${p.name} $n", filter == p.key) { onFilter(p.key) }
                 }
             }
             Spacer(Modifier.height(4.dp))

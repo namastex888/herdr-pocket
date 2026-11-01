@@ -169,6 +169,9 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
     BackHandler(selected != null || state.screen != Nav.TODAY || state.space != null || state.project != null) { vm.back() }
     val project = state.project?.let { key -> pulse.projects.find { it.key == key } }
     val root = selected == null && state.space == null && state.project == null && state.screen in Nav.TABS
+    // Kept here, not in the tabs, so a terminal opened from a tab comes back to the same view of it.
+    var spacesTree by rememberSaveable { mutableStateOf(false) }
+    var taskFilter by rememberSaveable { mutableStateOf<String?>(null) }
     val keyboard = WindowInsets.isImeVisible
     Scaffold(containerColor = Canvas, snackbarHost = { SnackbarHost(snackbar) },
         modifier = Modifier.imePadding(),
@@ -221,8 +224,8 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
                 state.screen == Nav.MACHINES -> MachinesScreen(state, nearby, onAdd = { addHost = true }, onPair = { pairDesktop = true }, onAddNearby = ::addNearby, onConnect = { vm.connect(it) }, onEdit = { editHost = it }, onDisconnect = { vm.disconnect(it) }, onRemove = vm::removeHost)
                 state.screen == Nav.SETTINGS -> SettingsScreen(state, vm)
                 state.screen == Nav.PROJECTS && project != null -> ProjectScreen(state, vm, project, pulse, remember(rows, project) { Projects.tree(rows, project) })
-                state.screen == Nav.PROJECTS -> ProjectsScreen(state, vm, pulse, rows)
-                state.screen == Nav.TASKS -> TasksScreen(state, vm, pulse)
+                state.screen == Nav.PROJECTS -> ProjectsScreen(state, vm, pulse, rows, spacesTree) { spacesTree = it }
+                state.screen == Nav.TASKS -> TasksScreen(vm, pulse, taskFilter) { taskFilter = it }
                 disconnected -> WelcomeScreen(state, nearby, onAdd = { addHost = true }, onPair = { pairDesktop = true }, onAddNearby = ::addNearby, onConnect = { vm.connect(it) }, onPreview = vm::enterDemo)
                 else -> OverviewScreen(state, null, vm, pulse, onAll = vm::showAll)
             }
