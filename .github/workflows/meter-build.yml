@@ -1,0 +1,87 @@
+name: Meter binaries
+
+# Builds the usage meter (meter/) for macOS and Linux, one artifact per OS and CPU, named as the
+# release assets are: automagik-meter-<darwin|linux>-<arm64|x86_64|aarch64>. Linux builds are
+# static (musl). release.yml calls it to publish them; meter.yml calls it to prove they build.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit or tag to build (default the caller's).
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.asset }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, target: aarch64-apple-darwin, asset: automagik-meter-darwin-arm64, run: true }
+          - { os: macos-latest, target: x86_64-apple-darwin, asset: automagik-meter-darwin-x86_64, run: false }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, asset: automagik-meter-linux-x86_64, run: true }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, asset: automagik-meter-linux-aarch64, run: true }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: meter
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '11.0'
+      CC_x86_64_unknown_linux_musl: musl-gcc
+      CC_aarch64_unknown_linux_musl: musl-gcc
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
+          rustup default stable
+          cargo --version
+
+      - name: musl
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            meter/target
+          key: meter-release-${{ matrix.target }}-${{ hashFiles('meter/Cargo.lock') }}
+          restore-keys: meter-release-${{ matrix.target }}-
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Check
+        env:
+          BIN: target/${{ matrix.target }}/release/meter
+        run: |
+          set -euo pipefail
+          file "$BIN"
+          if [ "$RUNNER_OS" = Linux ]; then
+            file "$BIN" | grep -q 'statically linked' || { echo "::error::not static"; exit 1; }
+          fi
+          if [ "${{ matrix.run }}" = true ]; then "$BIN" --version; fi
+
+      - name: Stage
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          cp "target/${{ matrix.target }}/release/meter" "$RUNNER_TEMP/out/${{ matrix.asset }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ runner.temp }}/out/${{ matrix.asset }}
+          if-no-files-found: error
+          retention-days: 7

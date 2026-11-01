@@ -8,10 +8,12 @@ on:
     paths:
       - 'meter/**'
       - '.github/workflows/meter.yml'
+      - '.github/workflows/meter-build.yml'
   pull_request:
     paths:
       - 'meter/**'
       - '.github/workflows/meter.yml'
+      - '.github/workflows/meter-build.yml'
   workflow_dispatch:
 
 permissions:
@@ -62,3 +64,9 @@ jobs:
 
       - name: Test
         run: cargo test --locked
+
+  binaries:
+    name: release binaries
+    uses: ./.github/workflows/meter-build.yml
+    permissions:
+      contents: read
