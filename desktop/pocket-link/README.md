@@ -25,8 +25,19 @@ It needs Node.js 20.3+ and herdr-core (`hc`), on macOS or Linux (systemd).
   and always end to end encrypted. The bridge also publishes its address to n0's lookup service.
 - **Programs it runs:** `node`, `npm` (setup), `hc connect`, `launchctl` / `systemctl --user`, `sh`;
   for the usage meter, `hc machine ls` and `hc exec` (`uname`, `sh`, `curl`, `nice`, the meter).
-- **Files it writes:** its own `.state/` folder, and the one login service file; on each machine,
+- **Files it writes:** its state folder (below), and the one login service file; on each machine,
   `~/.local/bin/automagik-meter` (and the meter's own store, see its README).
+- **Where its state lives:** `${XDG_STATE_HOME:-~/.local/state}/automagik-pocket-link/`, mode 0700,
+  outside the mod folder: this computer's key (`secret.key`, the identity phones pair with), the
+  paired phones, the current pairing code, the bridge's address, its log and the meter's status.
+  - **Reinstalling the mod is safe.** Deleting `mods/pocket-link/` and copying it again keeps every
+    pairing; only **Install the bridge** (npm) needs pressing again.
+  - Older versions kept it in `mods/pocket-link/.state/`. The first time the new bridge runs, it
+    moves those files over and leaves `.state/` empty.
+  - A Herdr started with another `HERDR_APP_HOME` gets its own folder,
+    `automagik-pocket-link-<hash>/`, so a test window never sees your phones.
+    `POCKET_LINK_STATE_DIR` sets the folder outright; the login service is given it.
+  - Deleting this folder unpairs every phone.
 
 - **Usage meter:** while the bridge runs, it keeps the
   [Automagik usage meter](../../meter/README.md) on this computer and on every connected herdr-core

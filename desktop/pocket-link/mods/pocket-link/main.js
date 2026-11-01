@@ -41,9 +41,11 @@ export default class PocketLink extends View {
     cx.spawn(async (cx) => {
       await this.reload();
       cx.notify();
-      // The bridge writes its state under .state: pairing, phones, its address.
+      // The bridge writes its state (pairing, phones, its address) in a folder outside the
+      // mod, and `status` says which.
       for (;;) {
-        await watchFolder(`${ROOT()}/.state`).catch(() => cx.sleep(3000));
+        const dir = this.status?.state;
+        await (dir ? watchFolder(dir) : Promise.reject()).catch(() => cx.sleep(3000));
         await this.reload();
         cx.notify();
       }
