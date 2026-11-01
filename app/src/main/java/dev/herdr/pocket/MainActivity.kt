@@ -47,6 +47,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
@@ -155,6 +156,14 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
         }
     }
     LifecycleResumeEffect(Unit) { activity?.let(Updater::resume); onPauseOrDispose { } }
+    LifecycleStartEffect(Unit) { vm.setForeground(true); onStopOrDispose { vm.setForeground(false) } }
+    // The desktop's alert toast: clicking it goes to the agent.
+    LaunchedEffect(state.alert) {
+        val a = state.alert ?: return@LaunchedEffect
+        val open = snackbar.showSnackbar(a.text, "Open", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed
+        vm.dismissAlert(a)
+        if (open) vm.selectTerminal(a.ref)
+    }
     LaunchedEffect(Unit) {
         if (CrashLog.announce() && snackbar.showSnackbar("Herdr Pocket closed unexpectedly last time", "Report", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed)
             vm.navigate("settings")

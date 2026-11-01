@@ -155,6 +155,12 @@ fun NearbyHost.prefill() = HostProfile("", name, host, "", port)
         }
         Spacer(Modifier.height(8.dp))
         Text("You can also pinch a terminal with two fingers to change its text size.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
+        Spacer(Modifier.height(28.dp)); SmallLabel("Alerts"); Spacer(Modifier.height(6.dp))
+        AlertRow("Sounds", "Play a sound when an agent needs you, or finishes while you aren’t looking at it.", state.alertSounds, onPlay = vm::playAlert) { vm.setAlerts(sounds = it) }
+        AlertRow("Needs you", "When an agent asks something or waits for approval.", state.alertBlocked) { vm.setAlerts(blocked = it) }
+        AlertRow("Done", "When an agent finishes a turn while you aren’t looking at it.", state.alertDone) { vm.setAlerts(done = it) }
+        Spacer(Modifier.height(4.dp))
+        Text("Alerts come while Herdr Pocket is connected. Tap Open on one to go to its agent.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
         Spacer(Modifier.height(34.dp)); HorizontalDivider(color = Border); Spacer(Modifier.height(26.dp))
         SmallLabel("About"); Spacer(Modifier.height(15.dp))
         Row(verticalAlignment = Alignment.CenterVertically) { Brand(36); Spacer(Modifier.width(12.dp)); Column { Text("Herdr Pocket", fontWeight = FontWeight.SemiBold); Text("${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · Android companion", color = Muted, fontSize = 12.sp) } }
@@ -163,6 +169,18 @@ fun NearbyHost.prefill() = HostProfile("", name, host, "", port)
         Spacer(Modifier.height(18.dp)); Text("A native companion for your existing herdr-core. Graphite colors, spaces and tabs follow the desktop’s design.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
         Spacer(Modifier.height(10.dp)); Text("Connections run while the app is open. Android may close them in the background; pull down on the agent list or tap Reconnect. Your remote programs keep running.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
         Spacer(Modifier.height(20.dp)); TextButton(onClick = vm::enterDemo, contentPadding = PaddingValues(0.dp)) { Text("Explore the interface with sample data", fontSize = 13.sp) }
+    }
+}
+
+/** One Settings > Alerts switch, like the desktop's; [onPlay] previews the sound. */
+@Composable fun AlertRow(title: String, detail: String, on: Boolean, onPlay: (() -> Unit)? = null, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable { onChange(!on) }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(2.dp)); Text(detail, color = Muted, fontSize = 12.sp, lineHeight = 17.sp)
+        }
+        onPlay?.let { IconButton(onClick = it) { Icon(Icons.Outlined.PlayArrow, "Play the alert sound", tint = Accent) } }
+        Spacer(Modifier.width(8.dp)); Switch(checked = on, onCheckedChange = onChange)
     }
 }
 
