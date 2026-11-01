@@ -19,8 +19,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /**
- * Android notifications for the desktop's alerts, while the person isn't in the app: one per agent, with Reply
- * (typed into the agent like the composer) and a tap that opens it. The app's own toast covers the foreground.
+ * Android notifications for the desktop's alerts, in the app and away from it, for agents the person isn't looking at: one per agent, with Reply
+ * (typed into the agent like the composer) and a tap that opens it.
  */
 object Notify {
     const val NEEDS_YOU = "needs_you"

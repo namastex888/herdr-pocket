@@ -157,13 +157,6 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
     LaunchedEffect(anyConnected) {
         if (anyConnected && Build.VERSION.SDK_INT >= 33 && vm.shouldAskNotifications()) notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
-    // The desktop's alert toast: clicking it goes to the agent.
-    LaunchedEffect(state.alert) {
-        val a = state.alert ?: return@LaunchedEffect
-        val open = snackbar.showSnackbar(a.text, "Open", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed
-        vm.dismissAlert(a)
-        if (open) vm.selectTerminal(a.ref)
-    }
     LaunchedEffect(Unit) {
         if (CrashLog.announce() && snackbar.showSnackbar("Automagik closed unexpectedly last time", "Report", duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed)
             vm.navigate("settings")
