@@ -25,7 +25,8 @@ so the mod folder can be deleted and copied again without unpairing a phone.
 - Where it lives, and the move out of the old folder: `desktop/pocket-link/mods/pocket-link/bridge/state.mjs:23`
   (`stateDir`) and `:81` (`open`), tested in `bridge/state.test.mjs` (CI:
   `.github/workflows/pocket-link.yml`).
-  - The folder is mode 0700; every file stays 0600.
+  - The folder is mode 0700; every file stays 0600 except `public-status.json` (0644), which holds
+    no ticket, id or secret (`bridge/presence.mjs`; see the README's "For other mods").
   - Another `HERDR_APP_HOME` gets its own folder, `automagik-pocket-link-<hash>/`.
   - `POCKET_LINK_STATE_DIR` overrides both. The login service is given the resolved folder that way,
     because launchd and systemd don't see the dialog's environment

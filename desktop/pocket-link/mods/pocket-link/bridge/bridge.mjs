@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url'
 import QRCode from 'qrcode'
 import { startMeter, failing } from './meter.mjs'
 import { open as openState } from './state.mjs'
+import { presence, publicStatus, writePublic, HEARTBEAT } from './presence.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SESSION = [...Buffer.from('herdr-pocket/1')]
@@ -99,6 +100,10 @@ async function pairPhone(conn, bi) {
 
 // Sessions now open, so removing a phone also ends what it has open.
 const live = new Set()
+// The phones those sessions belong to, for public-status.json (presence.mjs), the file other mods read.
+let serving = false
+const publishPublic = () => { try { writePublic(STATE, publicStatus({ running: serving, phones: phones.phones() })) } catch (e) { log('public status:', e.message) } }
+const phones = presence({ changed: () => { if (serving) publishPublic() } })
 function revoke() {
   const ids = new Set(devices().map(d => d.id))
   for (const s of live) if (!ids.has(s.phone)) {
@@ -120,7 +125,9 @@ async function session(conn, bi) {
   if (rest.length) hc.stdin.write(rest)
   const open = { phone, conn, hc }
   live.add(open)
-  hc.on('exit', () => live.delete(open))
+  // Counted from here until the phone hangs up or hc exits (a removed phone's hc is killed), whichever comes first.
+  const close = phones.open(phone, device.name)
+  hc.on('exit', () => { live.delete(open); close() })
   let writing = Promise.resolve()
   hc.stdout.on('data', chunk => {
     hc.stdout.pause()
@@ -128,12 +135,14 @@ async function session(conn, bi) {
   })
   hc.on('exit', () => { writing.then(() => bi.send.finish()).catch(() => {}) })
   hc.on('error', e => { log('session: hc failed:', e.message); conn.close(2n, [...Buffer.from('hc failed')]) })
-  for (;;) {
-    const data = await bi.recv.read(65536).catch(() => null)
-    if (!data || data.length === 0) break
-    if (!hc.stdin.write(Buffer.from(data))) await new Promise(r => hc.stdin.once('drain', r))
-  }
-  hc.stdin.end()
+  try {
+    for (;;) {
+      const data = await bi.recv.read(65536).catch(() => null)
+      if (!data || data.length === 0) break
+      if (!hc.stdin.write(Buffer.from(data))) await new Promise(r => hc.stdin.once('drain', r))
+    }
+    hc.stdin.end()
+  } finally { close() }
 }
 
 // The usage meter on this computer and every connected machine (meter.mjs). Its state is
@@ -150,8 +159,12 @@ async function serve() {
   ep.online().then(() => { publish(); log('serve: online as', ep.id().fmtShort()) }, e => log('serve: no relay yet:', e.message))
   ep.watchAddr(() => publish())
   const meter = meterLoop()
-  const stop = async () => { meter.stop(); try { const s = readJson(files.status, {}); if (s.pid === process.pid) unlinkSync(files.status) } catch {}; await ep.close().catch(() => {}); process.exit(0) }
+  const stop = async () => { meter.stop(); serving = false; publishPublic(); try { const s = readJson(files.status, {}); if (s.pid === process.pid) unlinkSync(files.status) } catch {}; await ep.close().catch(() => {}); process.exit(0) }
   process.on('SIGTERM', stop); process.on('SIGINT', stop)
+  // public-status.json: running from here (a stop now writes running: false), then `updated` every
+  // HEARTBEAT and on each session open and close.
+  serving = true; publishPublic()
+  setInterval(publishPublic, HEARTBEAT).unref()
   setInterval(revoke, 2000).unref()
   for (;;) {
     const incoming = await ep.acceptNext()
@@ -165,6 +178,7 @@ async function serve() {
       else await session(conn, bi)
     })().catch(e => log('connection:', e.message))
   }
+  serving = false; publishPublic()
 }
 
 async function pair(minutes = 10) {

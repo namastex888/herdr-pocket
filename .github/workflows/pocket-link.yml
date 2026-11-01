@@ -1,7 +1,7 @@
 name: Pocket Link
 
 # The desktop mod's bridge (desktop/pocket-link/): syntax and its dependency-free tests (the
-# usage meter installer and loop, and where its state lives), on Linux and macOS. Runs only when the mod changes.
+# usage meter installer and loop, where its state lives, and public-status.json), on Linux and macOS. Runs only when the mod changes.
 on:
   push:
     branches: [dev]
@@ -41,6 +41,6 @@ jobs:
         with:
           node-version: '22'
       - name: Syntax
-        run: node --check bridge/bridge.mjs && node --check bridge/meter.mjs && node --check bridge/state.mjs
+        run: node --check bridge/bridge.mjs && node --check bridge/meter.mjs && node --check bridge/state.mjs && node --check bridge/presence.mjs
       - name: Test
-        run: node --test bridge/meter.test.mjs bridge/state.test.mjs
+        run: node --test bridge/meter.test.mjs bridge/state.test.mjs bridge/presence.test.mjs
