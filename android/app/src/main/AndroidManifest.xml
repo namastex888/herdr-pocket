@@ -1,4 +1,4 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -22,6 +22,8 @@
             android:taskAffinity="" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize">
             <intent-filter><action android:name="android.intent.action.ASSIST"/><category android:name="android.intent.category.DEFAULT"/></intent-filter>
         </activity>
+        <!-- The QR scanner follows the phone: the library locks it to landscape, so portrait scanning needs this. -->
+        <activity android:name="com.journeyapps.barcodescanner.CaptureActivity" android:screenOrientation="fullSensor" tools:replace="screenOrientation" />
         <receiver android:name=".UpdateReceiver" android:exported="false" />
         <!-- Android starts the new build right after an update, so "Updated to" shows without waiting for the next open. -->
         <receiver android:name=".UpdatedReceiver" android:exported="false">
