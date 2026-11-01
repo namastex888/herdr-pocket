@@ -91,15 +91,26 @@ surface.addEventListener('touchend',e=>{
     touch=null;return;
   }
   if(touch&&touch.dragged){e.preventDefault();e.stopImmediatePropagation();suppressClickUntil=Date.now()+400}
-  else if(touch&&e.touches.length===0&&Date.now()-touch.at<500){
-    // A quick tap on a link opens it instead of focusing the terminal.
-    const cell=cellAt(touch.x,touch.y),url=cell&&window.linkAt(cell.y,cell.x);
-    if(url){e.preventDefault();e.stopImmediatePropagation();suppressClickUntil=Date.now()+400;Pocket.openUrl(url,false)}
+  else if(touch&&e.touches.length===0){
+    // A tap never reaches xterm as a mouse press: xterm focuses its textarea on mousedown, which
+    // raised the soft keyboard and resized the screen under the finger. The keyboard button does that.
+    e.preventDefault();e.stopImmediatePropagation();suppressClickUntil=Date.now()+400;
+    // A quick tap on a link opens it; a program that tracks the mouse still gets the tap as a click.
+    const cell=cellAt(touch.x,touch.y),url=Date.now()-touch.at<500&&cell&&window.linkAt(cell.y,cell.x);
+    if(url)Pocket.openUrl(url,false);
+    else if(cell&&terminal.modes.mouseTrackingMode!=='none')click(touch.x,touch.y);
   }
   touch=null;
 },{capture:true,passive:false});
+// Sends a click through xterm's own mouse reporting, without the focus it takes on mousedown.
+const click=(x,y)=>{const target=terminal.element.querySelector('.xterm-screen'),area=terminal.textarea;
+  area.focus=()=>{};
+  try{for(const type of['mousedown','mouseup'])target.dispatchEvent(new MouseEvent(type,{bubbles:true,cancelable:true,view:window,clientX:x,clientY:y,button:0,buttons:type==='mousedown'?1:0}))}
+  finally{delete area.focus}};
 surface.addEventListener('touchcancel',()=>{touch=null;endPinch()},{capture:true,passive:true});
 surface.addEventListener('click',e=>{if(Date.now()<suppressClickUntil){e.preventDefault();e.stopImmediatePropagation()}},{capture:true});
+// A long press opens xterm's right-click handling, which focuses the textarea too.
+surface.addEventListener('contextmenu',e=>{e.preventDefault();e.stopImmediatePropagation()},{capture:true});
 function measure(){if(!document.documentElement.clientHeight)return;const dimensions=fit.proposeDimensions();if(!dimensions||dimensions.cols<2||dimensions.rows<2)return;fit.fit();if(!ready){ready=true;Pocket.ready(terminal.cols,terminal.rows)}else Pocket.resized(terminal.cols,terminal.rows)}
 const resized=()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(measure,120)};
 if(window.ResizeObserver)new ResizeObserver(resized).observe(document.getElementById('terminal'));else window.addEventListener('resize',resized);
