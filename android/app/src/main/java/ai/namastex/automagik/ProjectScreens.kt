@@ -33,6 +33,7 @@ private fun plural(n: Int, one: String, many: String = "${one}s") = "$n ${if (n 
 /** Projects: one card per repository, or the desktop's spaces tree as its sidebar draws it. */
 @Composable fun ProjectsScreen(state: PocketState, vm: PocketViewModel, pulse: Projects.Pulse, rows: List<SidebarRow>,
                                tree: Boolean, onTree: (Boolean) -> Unit) {
+    val spend = rememberSpend(state)
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 28.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item(key = "views") {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -45,17 +46,27 @@ private fun plural(n: Int, one: String, many: String = "${one}s") = "$n ${if (n 
                 onSpace = { vm.selectSpace(it.hostId, it.space.id) }, onTerminal = vm::selectTerminal)
             if (rows.none { it is SpaceRow }) item { Empty(Icons.Outlined.FolderOpen, "No spaces yet", "Your spaces appear here when you connect.") }
         } else {
-            items(pulse.projects, key = { "p:${it.key}" }) { ProjectCard(it) { vm.openProject(it.key) } }
+            item(key = "spend") {
+                if (spend.coverage.none) MeterHint()
+                else Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(Spend.coverageLine(spend.coverage), color = if (spend.coverage.complete) Muted else Blocked, fontSize = 12.sp)
+                    spend.hourly()?.let { HourChart(it) }
+                }
+            }
+            items(pulse.projects, key = { "p:${it.key}" }) { ProjectCard(it, spend.takeIf { s -> !s.coverage.none }) { vm.openProject(it.key) } }
             if (pulse.projects.isEmpty()) item { Empty(Icons.Outlined.GridView, "No projects yet", "Each repository your spaces work in shows up here.") }
+            else if (!spend.coverage.none) item(key = "spend-notes") { Text(Spend.footnote(spend), color = Muted, fontSize = 11.sp, lineHeight = 15.sp) }
         }
     }
 }
 
 /**
- * A project's card: name, the share of its agents that need the person, work and finished, and its counts. The
- * title row's end is where the usage meter's spend goes once a machine publishes it; nothing shows there until then.
+ * A project's card: name, the share of its agents that need the person, work and finished, and its counts. With a
+ * usage meter reporting ([spend]), a repository's $ over the last 24 h ends the title row, and its 30-day cost per task
+ * and task count follow the counts; without one nothing shows there.
  */
-@Composable fun ProjectCard(p: Projects.Project, onClick: () -> Unit) {
+@Composable fun ProjectCard(p: Projects.Project, spend: Spend.View? = null, onClick: () -> Unit) {
+    val repo = spend?.takeIf { p.key.startsWith("repo:") }
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Surface)
         .border(1.dp, if (p.needsYou > 0) Blocked.copy(alpha = .32f) else Border, RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(9.dp)) {
@@ -65,12 +76,32 @@ private fun plural(n: Int, one: String, many: String = "${one}s") = "$n ${if (n 
                 if (p.remote.isNotBlank()) Text(p.remote, color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Text(plural(p.spaces.size, "space"), color = Muted, fontSize = 12.sp)
+            if (repo != null) {
+                Spacer(Modifier.width(10.dp))
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(Spend.money(repo.project(p.key, Spend.Period.D1)), color = Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Text("24h", color = Muted, fontSize = 11.sp)
+                }
+            }
             Spacer(Modifier.width(4.dp)); Icon(Icons.Outlined.ChevronRight, null, Modifier.size(16.dp), tint = Muted)
         }
         StatusBar(p.needsYou, p.working, p.done, p.agents.size)
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             Count(p.needsYou, "needs you", Blocked); Count(p.working, "working", Working); Count(p.done, "done", Done)
         }
+        if (repo != null && repo.project(p.key, Spend.Period.D30) != null) Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Figure(Spend.money(repo.costPerTask(p.key, Spend.Period.D30)), "avg / task")
+            Figure(repo.taskCount(p.key, Spend.Period.D30)?.toString() ?: "—", "tasks")
+            repo.hoursPerTask(p.key)?.let { Figure(Spend.hours(it), "per task") }
+            Text("30d", color = Muted, fontSize = 12.sp)
+        }
+    }
+}
+
+@Composable private fun Figure(value: String, text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(value, color = Ink, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.width(4.dp)); Text(text, color = Muted, fontSize = 12.sp)
     }
 }
 
@@ -98,6 +129,8 @@ private fun plural(n: Int, one: String, many: String = "${one}s") = "$n ${if (n 
     val spaceRows = tree.filterIsInstance<SpaceRow>()
     val bySpace = project.agents.groupBy { a -> a.space?.let { a.ref.hostId to it.id } }
     val listed = spaceRows.map { it.hostId to it.space.id }.toSet()
+    val spend = rememberSpend(state).takeIf { !it.coverage.none && project.key.startsWith("repo:") }
+    var period by rememberSaveable { mutableStateOf(Spend.Period.D1) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 28.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item(key = "counts") {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -110,9 +143,14 @@ private fun plural(n: Int, one: String, many: String = "${one}s") = "$n ${if (n 
                 project.agents.map { it.machine }.filter { it.isNotBlank() }.distinct().let { if (it.isEmpty()) "" else it.joinToString(", ") })
                 .filter { it.isNotBlank() }.joinToString(" · "), color = Muted, fontSize = 12.sp)
         }
+        if (spend != null) {
+            item(key = "spend") { ProjectSpend(spend, project.key, period) { period = it } }
+            item(key = "spend-tasks") { TaskSpendList(spend.tasks(project.key, period), period) }
+            item(key = "spend-notes") { SpendNotes(spend) }
+        }
         if (tasks.isNotEmpty()) {
             item(key = "tasks") { SectionHeader("Tasks", tasks.size) }
-            items(tasks, key = { "t:${it.branch}" }) { TaskRow(it, showProject = false, onOpen = vm::selectTerminal) }
+            items(tasks, key = { "t:${it.branch}" }) { TaskRow(it, showProject = false, spend = spend?.task(it.project, it.branch, period), onOpen = vm::selectTerminal) }
         }
         item(key = "spaces") { SectionHeader("Spaces", project.spaces.size) }
         for (row in spaceRows) {
@@ -141,6 +179,8 @@ private fun LazyListScope.agentCards(state: PocketState, vm: PocketViewModel, ag
 /** Tasks: every project's branches by status, Needs you first, with a project filter. */
 @Composable fun TasksScreen(vm: PocketViewModel, pulse: Projects.Pulse, filter: String?, onFilter: (String?) -> Unit) {
     var idle by rememberSaveable { mutableStateOf(false) }
+    val state by vm.state.collectAsState()
+    val spend = rememberSpend(state).takeIf { !it.coverage.none }
     val tasks = pulse.tasks.filter { filter == null || it.project == filter }
     val board = Projects.board(tasks)
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 28.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -154,6 +194,8 @@ private fun LazyListScope.agentCards(state: PocketState, vm: PocketViewModel, ag
             }
             Spacer(Modifier.height(4.dp))
             Text("${plural(tasks.count { !it.untasked }, "task")} on branches · ${tasks.count { it.untasked }} untasked", color = Muted, fontSize = 12.sp)
+            if (spend != null) Text("$ and active time per task over 30 days, API-equivalent estimate" +
+                spend.pricesDate.takeIf { it.isNotBlank() }?.let { " (prices of $it)" }.orEmpty(), color = Muted, fontSize = 11.sp)
         }
         for ((rank, list) in board) {
             val folded = rank == Cockpit.IDLE && !idle
@@ -165,14 +207,19 @@ private fun LazyListScope.agentCards(state: PocketState, vm: PocketViewModel, ag
                     if (rank == Cockpit.IDLE) Text(if (idle) "Hide" else "Show", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 }
             }
-            if (!folded) items(list, key = { "t:${it.project}:${it.branch}" }) { TaskRow(it, showProject = true, onOpen = vm::selectTerminal) }
+            if (!folded) items(list, key = { "t:${it.project}:${it.branch}" }) {
+                TaskRow(it, showProject = true, spend = spend?.task(it.project, it.branch, Spend.Period.D30), onOpen = vm::selectTerminal)
+            }
         }
         if (board.isEmpty()) item { Empty(Icons.Outlined.Checklist, "No tasks yet", "Agents show up here by branch: each branch is a task.") }
     }
 }
 
-/** A task: its branch (or Untasked), then project · agent · machine; several agents each get a line to open. */
-@Composable fun TaskRow(task: Projects.Task, showProject: Boolean, onOpen: (TerminalRef) -> Unit) {
+/**
+ * A task: its branch (or Untasked), then project · agent · machine; several agents each get a line to open. [spend] is
+ * the meter's figures for its branch, under its status.
+ */
+@Composable fun TaskRow(task: Projects.Task, showProject: Boolean, spend: Spend.TaskView? = null, onOpen: (TerminalRef) -> Unit) {
     val color = stateColor(word(task.rank))
     val lead = task.agents.first()
     fun where(a: Projects.Agent) = listOfNotNull(a.terminal.agent, a.machine.ifBlank { null }).joinToString(" · ")
@@ -186,7 +233,11 @@ private fun LazyListScope.agentCards(state: PocketState, vm: PocketViewModel, ag
                 Text(parts.joinToString(" · "), color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Spacer(Modifier.width(8.dp))
-            Text(statusLabel(word(task.rank), if (task.rank == Cockpit.BLOCKED) lead.terminal.kind else ""), color = color, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            Column(horizontalAlignment = Alignment.End) {
+                Text(statusLabel(word(task.rank), if (task.rank == Cockpit.BLOCKED) lead.terminal.kind else ""), color = color, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                if (spend != null) Text(listOfNotNull(Spend.money(spend.sum), spend.hours?.let { Spend.hours(it.toDouble()) }).joinToString(" · "),
+                    color = Ink, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
         }
         if (task.agents.size > 1) task.agents.forEach { a ->
             Row(Modifier.fillMaxWidth().clickable { onOpen(a.ref) }.padding(start = 30.dp, end = 12.dp, top = 2.dp, bottom = 9.dp), verticalAlignment = Alignment.CenterVertically) {

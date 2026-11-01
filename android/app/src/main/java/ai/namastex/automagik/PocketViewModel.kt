@@ -21,7 +21,9 @@ data class MachineState(val connecting: Boolean = false, val connected: Boolean 
     /** Desktop avatar colours (shared.json space.colors), by space id. */
     val colors: Map<String, String> = emptyMap(),
     /** Git answers for the drawer, by Sidebar.gitKey: null is not a repository. */
-    val git: Map<String, GitInfo?> = emptyMap()) {
+    val git: Map<String, GitInfo?> = emptyMap(),
+    /** The usage meter's doc per machine this core reaches ("" is its own); a machine with no meter has none. */
+    val meter: Map<String, Spend.Reading> = emptyMap()) {
     /** Dropped or failed, as opposed to never connected or disconnected on purpose. */
     val offline get() = !connected && (connecting || error != null)
     /** Worth retrying without asking: a dropped or failed connection that isn't waiting on a password. */
@@ -75,6 +77,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     /** Herdr desktop's program table, for the drawer's names and icons. */
     val programs: Programs by lazy { Programs(JSONObject(application.assets.open("programs.json").bufferedReader().use { it.readText() })) }
     private val colorsRead = ConcurrentHashMap<String, Long>()
+    private val meterRead = ConcurrentHashMap<String, Long>()
     private val homes = ConcurrentHashMap<String, String>()
     private val herdrHomes = ConcurrentHashMap<String, String>()
     // Git for the spaces tree, projects and tasks runs in its own slow loop, never in the event refresh: one pass after
@@ -301,6 +304,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         if (state.value.refreshing) return
         if (state.value.demo) { viewModelScope.launch { _state.update { it.copy(refreshing = true) }; delay(400); _state.update { it.copy(refreshing = false) } }; return }
         _state.update { it.copy(refreshing = true) }
+        meterRead.clear()
         val retry = state.value.hosts.filter { h -> state.value.machines[h.id]?.retryable == true }
         retry.forEach { connect(it) }
         viewModelScope.launch(Dispatchers.IO) {
@@ -477,6 +481,21 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         if (now - (colorsRead[id] ?: 0L) > 30_000) { colorsRead[id] = now; runCatching { readColors(id, client) } }
         runCatching { fetchIcons(id, client, terminals) }
         gitWake.trySend(Unit)
+        // The meter publishes at most every 10 minutes: a read every 5 is plenty, and pull to refresh reads at once.
+        if (now - (meterRead[id] ?: 0L) > 300_000) { meterRead[id] = now; runCatching { readMeter(id, client, linked) } }
+    }
+    /**
+     * Each machine's usage-meter doc, read only. A machine whose read fails keeps its last doc (shown as stale); one
+     * that answers with no doc has no meter.
+     */
+    private suspend fun readMeter(id: String, client: CoreClient, linked: List<LinkedMachine>) {
+        val read = HashMap<String, Spend.Reading?>()
+        val own = state.value.hosts.find { it.id == id }?.name ?: "Machine"
+        runCatching { client.call("doc.get", JSONObject().put("name", Spend.DOC)) }
+            .onSuccess { read[""] = Spend.parse(own, it.optJSONObject("value")) }
+        for (m in linked.filter { it.connected }) runCatching { client.call("doc.get", JSONObject().put("name", Spend.DOC).put("on", m.name)) }
+            .onSuccess { read[m.name] = Spend.parse(m.name, it.optJSONObject("value")) }
+        updateMachine(id) { m -> m.copy(meter = (m.meter - read.filterValues { it == null }.keys) + read.mapNotNull { (k, v) -> v?.let { k to it } }) }
     }
     /** Herdr desktop's config folder on the core's machine (it may have none: an SSH host without the app). */
     private suspend fun herdrHome(id: String, client: CoreClient): String? = herdrHomes[id] ?: exec(client, "printenv", "HERDR_APP_HOME")
@@ -773,7 +792,8 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         val git = mapOf(repo("~/work/herdr", "dev"), repo("~/work/herdr-auth", "feat/auth-flow"), repo("~/work/herdr-api", "fix/api-review"),
             repo("~/work/herdr-squad", "feat/release-notes"), repo("~/work/website", "main", "~/work/website/.git", "example/website"))
         _state.update { it.copy(demo = true, screen = Nav.TODAY, selected = null, space = null, project = null,
-            machines = mapOf(id to MachineState(connected = true, version = "preview", terminals = terminals, spaces = spaces, git = git))) }
+            machines = mapOf(id to MachineState(connected = true, version = "preview", terminals = terminals, spaces = spaces, git = git,
+                meter = SpendDemo.readings(System.currentTimeMillis())))) }
     }
     fun leaveDemo() { detach(); _state.update { it.copy(demo = false, machines = emptyMap(), selected = null, space = null, project = null) } }
     fun hostName(hostId: String) = if (state.value.demo) "Preview machine" else state.value.hosts.find { it.id == hostId }?.name ?: "Machine"
