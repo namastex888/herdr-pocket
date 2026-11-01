@@ -51,7 +51,8 @@ object Spend {
             reported + o.reported, gap || o.gap)
     }
 
-    data class ProjectData(val windows: Map<Period, Sum>, val tasks: Int?, val hours: Int?)
+    /** [tasks] and [usdPerTask] are the meter's own 30-day figures for this project on one machine (v2). */
+    data class ProjectData(val windows: Map<Period, Sum>, val tasks: Int?, val hours: Int?, val usdPerTask: Double? = null)
     data class TaskData(val project: String, val branch: String, val agents: List<String>, val hours: Int?, val windows: Map<Period, Sum>)
 
     /** What one machine's doc said, or why it can't be used. [name] is how the phone names that machine. */
@@ -72,12 +73,23 @@ object Spend {
         val totalGaps: Set<Period>,
         /** Windows where some project lost its figures to fit the doc (cut, or rows without their repo). */
         val projectGaps: Set<Period>,
-        /** Windows where some task lost its figures to fit the doc (cut, or rows without their branch). */
+        /**
+         * Windows where the doc dropped task detail (rows lost their branch, or days were cut), so tasks can't be
+         * counted. A meter that only started inside a window is in [totalGaps] instead: a lower bound, still countable.
+         */
         val taskGaps: Set<Period>,
         /** Harnesses whose usage the meter couldn't fully read: "codex degraded". */
         val issues: List<String> = emptyList(),
         val reportedUsd: Boolean = false,
-    ) : Reading
+        /** Projects cut from the doc to fit: a project missing here may still have usage on this machine. */
+        val projectsCut: Boolean = false,
+        /** Tasks cut from the doc to fit; then only the projects in [tasksWhole] still list all of theirs. */
+        val tasksCut: Boolean = false,
+        val tasksWhole: Set<String> = emptySet(),
+    ) : Reading {
+        /** Some of [key]'s tasks on this machine are missing from the doc in window [p]. */
+        fun tasksMissing(key: String, p: Period) = p in taskGaps || (tasksCut && key !in tasksWhole && (key in projects || projectsCut))
+    }
 
     /**
      * A doc as `doc.get` returns its value: null when the machine has none (no meter there). [name] names the machine
@@ -127,7 +139,8 @@ object Spend {
             val w = windows2(o)
             w.forEach { (p, s) -> add(p, s) }
             val key = projectKey(o.clean("repo")) ?: continue
-            projects[key] = ProjectData(w, o.optInt("tasks", -1).takeIf { it >= 0 }, o.optInt("hours", -1).takeIf { it >= 0 })
+            projects[key] = ProjectData(w, o.optInt("tasks", -1).takeIf { it >= 0 }, o.optInt("hours", -1).takeIf { it >= 0 },
+                o.optDouble("usd_per_task").takeIf { !it.isNaN() })
         }
         v.optJSONObject("projects_other")?.let { o -> windows2(o).forEach { (p, s) -> add(p, s) } }
         val tasks = v.optJSONArray("tasks")?.objects().orEmpty().mapNotNull { o ->
@@ -155,11 +168,13 @@ object Spend {
         val issues = v.optJSONObject("sources")?.let { s ->
             s.keys().asSequence().toList().sorted().mapNotNull { k -> s.optJSONObject(k)?.clean("status")?.takeIf { it == "degraded" || it == "unsupported" }?.let { "$k $it" } }
         }.orEmpty()
+        // Busy machines keep every project but cut tasks: a project whose kept tasks match its count still lists them all.
+        val whole = projects.filter { (key, d) -> d.tasks != null && tasks.count { it.project == key } == d.tasks }.keys
         val prices = v.optJSONObject("prices")
         return Report(name, v.clean("machine").ifBlank { name }, 2, generated, prices?.clean("date").orEmpty(), v.optBoolean("complete", true),
             totals, projects, tasks, hourly, hourlyFrom, late,
-            if (projectsCut) Period.entries.toSet() else late, if (tasksCut) Period.entries.toSet() else late, issues,
-            totals.values.any { it.reported > 0 })
+            if (projectsCut) Period.entries.toSet() else late, emptySet(), issues,
+            totals.values.any { it.reported > 0 }, projectsCut, tasksCut, whole)
     }
 
     // Version 1 (meter 0.7): hourly rows for 48 hours, then daily rows, by harness, model, repo and branch.
@@ -204,7 +219,9 @@ object Spend {
         fun gaps(from: Long) = Period.entries.filter { from > start(it) }.toSet()
         val prices = v.optJSONObject("prices")
         return Report(name, v.clean("machine").ifBlank { name }, 1, generated, prices?.clean("date").orEmpty(), v.optBoolean("complete", true),
-            windows(all), projects, tasks, hourly, hourlyFrom, gaps(covered), gaps(repoFrom), gaps(branchFrom),
+            windows(all), projects, tasks, hourly, hourlyFrom, gaps(covered), gaps(repoFrom),
+            // Only detail the doc dropped hides tasks; a meter that started counting late just makes their sums partial.
+            if (branchFrom == counted) emptySet() else gaps(branchFrom),
             reportedUsd = all.any { it.sum.reported > 0 })
     }
 
@@ -258,22 +275,35 @@ object Spend {
         /** The project's tasks with usage in the window, merged across machines, most spent first. */
         fun tasks(key: String, p: Period): List<TaskView> = reports.flatMap { it.tasks }.filter { it.project == key && p in it.windows }
             .groupBy { it.branch }.map { (branch, parts) ->
-                val gap = reports.any { p in it.taskGaps }
+                // A kept task is exact on its machine; it undercounts only where another machine may have cut it.
+                val gap = reports.any { r -> r.tasksMissing(key, p) && r.tasks.none { it.project == key && it.branch == branch } } ||
+                    reports.any { r -> p in r.totalGaps && key in r.projects }
                 TaskView(key, branch, parts.map { it.windows.getValue(p) }.reduce(Sum::plus).let { it.copy(gap = it.gap || gap) },
                     parts.map { it.hours }.takeIf { h -> h.none { it == null } }?.sumOf { it ?: 0 }, parts.flatMap { it.agents }.distinct())
             }.sortedWith(compareByDescending<TaskView> { it.sum.usd ?: -1.0 }.thenByDescending { it.sum.tokens.total })
 
         fun task(key: String, branch: String?, p: Period): TaskView? = branch?.let { b -> tasks(key, p).find { it.branch == b } }
 
-        /** No machine cut task detail in this window: counts and averages over tasks are whole. */
-        fun tasksKnown(p: Period) = reports.none { p in it.taskGaps }
+        /** Every machine lists all of [key]'s tasks for this window: counts and averages over its tasks are whole. */
+        fun tasksKnown(key: String, p: Period) = reports.none { it.tasksMissing(key, p) }
+
+        /**
+         * With the task list cut, the meter's own 30-day count and $ per task for the project, when one machine alone
+         * has it (two machines' counts can't be added: the same branch may be on both).
+         */
+        private fun meterFigures(key: String, p: Period): ProjectData? =
+            if (p != Period.D30) null else reports.filter { key in it.projects }.singleOrNull()?.projects?.get(key)
 
         /** Tasks with usage in the window, or null when some were cut and can't be counted. */
-        fun taskCount(key: String, p: Period): Int? = if (tasksKnown(p)) tasks(key, p).size else null
+        fun taskCount(key: String, p: Period): Int? = if (tasksKnown(key, p)) tasks(key, p).size else meterFigures(key, p)?.tasks
 
         /** The mean $ of the window's tasks (untasked work excluded); null with no tasks, none priced, or some cut. */
         fun costPerTask(key: String, p: Period): PerTask? {
-            if (!tasksKnown(p)) return null
+            if (!tasksKnown(key, p)) return meterFigures(key, p)?.let { d ->
+                val usd = d.usdPerTask ?: return null
+                val tasks = d.tasks?.takeIf { it > 0 } ?: return null
+                PerTask(usd, tasks, project(key, p)?.let { it.unpriced > 0 || reports.any { r -> p in r.totalGaps && key in r.projects } } ?: false)
+            }
             val tasks = tasks(key, p).ifEmpty { return null }
             val priced = tasks.filter { it.sum.usd != null }.ifEmpty { return null }
             return PerTask(priced.sumOf { it.sum.priced } / tasks.size, tasks.size, priced.size < tasks.size || tasks.any { it.sum.atLeast })
@@ -281,7 +311,7 @@ object Spend {
 
         /** Mean active hours per task over 30 days (hours with usage, not wall time); null when the doc has none. */
         fun hoursPerTask(key: String): Double? {
-            if (!tasksKnown(Period.D30)) return null
+            if (!tasksKnown(key, Period.D30)) return null
             val tasks = tasks(key, Period.D30).ifEmpty { return null }
             if (tasks.any { it.hours == null }) return null
             return tasks.sumOf { it.hours ?: 0 }.toDouble() / tasks.size
