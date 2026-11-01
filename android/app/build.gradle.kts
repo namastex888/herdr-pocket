@@ -63,6 +63,12 @@ dependencies {
     implementation("org.bouncycastle:bcprov-jdk15to18:1.83")
     // iroh: dial a paired desktop by its key; direct when it can, an end-to-end encrypted relay when it can't.
     implementation("computer.iroh:iroh-android:1.2.0")
+    // JNA, which iroh's bindings load, pinned above the 5.15.0 that iroh-android 1.2.0 asks for: 5.15.0's
+    // libjnidispatch.so isn't 16 KB page-size ready (x86_64 LOAD segments 4 KB aligned; arm64 read-only RELRO
+    // ends inside a writable page), and Play requires it for apps targeting API 35+. 5.17.0's AAR is 16 KB aligned.
+    // The AAR is the Android build (classes plus jni/<abi>/libjnidispatch.so); iroh-android already leaves out the
+    // desktop jar, so this is the only JNA in the APK. Remove the pin once iroh-android depends on JNA 5.17 or newer.
+    implementation("net.java.dev.jna:jna:5.17.0@aar")
     // A bundled QR scanner (camera + ZXing): works without Google Play services.
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     // Draws the desktop's own program icons (SVG), read from the person's desktop at runtime.

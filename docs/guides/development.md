@@ -32,6 +32,10 @@ cd android
 This is the same gate CI runs. The debug APK is
 `android/app/build/outputs/apk/debug/app-debug.apk`.
 
+**16 KB pages.** Play requires every native library to support 16 KB memory pages. JNA is pinned
+to 5.17.0 (`android/app/build.gradle.kts:66-71`) because iroh-android 1.2.0 brings 5.15.0, whose
+`libjnidispatch.so` isn't 16 KB aligned. Drop the pin when iroh-android depends on JNA 5.17 or newer.
+
 ## 3. Run it
 
 **On a phone:** `adb install -r android/app/build/outputs/apk/debug/app-debug.apk`. Android 8.0
