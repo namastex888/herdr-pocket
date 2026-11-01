@@ -9,15 +9,21 @@ data class HostProfile(
     val id: String, val name: String, val host: String, val user: String,
     val port: Int = 22, val session: String = "default", val fingerprint: String = "",
     /** Machines this host's core reaches, remembered so they show before the next connection. */
-    val linked: List<String> = emptyList()
+    val linked: List<String> = emptyList(),
+    /** "ssh", or "iroh" for a desktop paired through Herdr's Pocket Link mod ([ticket] says how to reach it). */
+    val transport: String = "ssh", val ticket: String = ""
 ) {
+    val paired get() = transport == "iroh"
+    /** How the machine is reached, for its card. */
+    val address get() = if (paired) "Paired · Pocket Link" else "$user@$host" 
     fun json() = JSONObject().put("id", id).put("name", name).put("host", host)
         .put("user", user).put("port", port).put("session", session).put("fingerprint", fingerprint)
-        .put("linked", JSONArray(linked))
+        .put("linked", JSONArray(linked)).put("transport", transport).put("ticket", ticket)
     companion object {
         fun parse(j: JSONObject) = HostProfile(j.getString("id"), j.getString("name"), j.getString("host"),
             j.getString("user"), j.optInt("port", 22), j.optString("session", "default"), j.optString("fingerprint"),
-            j.optJSONArray("linked")?.let { a -> (0 until a.length()).mapNotNull { a.optString(it).ifBlank { null } } }.orEmpty())
+            j.optJSONArray("linked")?.let { a -> (0 until a.length()).mapNotNull { a.optString(it).ifBlank { null } } }.orEmpty(),
+            j.optString("transport", "ssh").ifBlank { "ssh" }, j.optString("ticket"))
     }
 }
 

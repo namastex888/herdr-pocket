@@ -74,7 +74,7 @@ fun PocketState.linkedFor(host: HostProfile): List<LinkedMachine> =
 
 fun NearbyHost.prefill() = HostProfile("", name, host, "", port)
 
-@Composable fun MachinesScreen(state: PocketState, nearby: List<NearbyHost>, onAdd: () -> Unit, onAddNearby: (NearbyHost) -> Unit, onConnect: (HostProfile) -> Unit, onEdit: (HostProfile) -> Unit, onDisconnect: (String) -> Unit, onRemove: (String) -> Unit) {
+@Composable fun MachinesScreen(state: PocketState, nearby: List<NearbyHost>, onAdd: () -> Unit, onPair: () -> Unit, onAddNearby: (NearbyHost) -> Unit, onConnect: (HostProfile) -> Unit, onEdit: (HostProfile) -> Unit, onDisconnect: (String) -> Unit, onRemove: (String) -> Unit) {
     var remove by remember { mutableStateOf<HostProfile?>(null) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item { Text("Your work lives here.", fontSize = 26.sp, fontWeight = FontWeight.SemiBold); Spacer(Modifier.height(10.dp)); Text("Connect to the machine running herdr-core. Use its local address or Tailscale hostname.", fontSize = 13.sp, lineHeight = 21.sp, color = Muted); Spacer(Modifier.height(12.dp)) }
@@ -86,7 +86,7 @@ fun NearbyHost.prefill() = HostProfile("", name, host, "", port)
                         Icon(Icons.Outlined.Computer, null, Modifier.size(22.dp), tint = Accent); Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(host.name, fontWeight = FontWeight.Medium, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Spacer(Modifier.height(4.dp)); Text("${host.user}@${host.host}:${host.port}", fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Spacer(Modifier.height(4.dp)); Text(if (host.paired) host.address else "${host.user}@${host.host}:${host.port}", fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         Dot(if (machine.connected) Color(0xffa6bd91) else Muted)
                     }
@@ -107,7 +107,8 @@ fun NearbyHost.prefill() = HostProfile("", name, host, "", port)
                 }
             }
         }
-        item { OutlinedButton(onClick = onAdd, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(12.dp)) { Icon(Icons.Outlined.Add, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Add machine") } }
+        item { Button(onClick = onPair, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(12.dp)) { Icon(Icons.Outlined.QrCodeScanner, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Pair with Herdr desktop") } }
+        item { OutlinedButton(onClick = onAdd, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(12.dp)) { Icon(Icons.Outlined.Add, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Add an SSH machine") } }
         item { Spacer(Modifier.height(6.dp)); NearbySection(nearby, onAddNearby) }
         item {
             Spacer(Modifier.height(10.dp)); SmallLabel("First connection")
@@ -167,6 +168,7 @@ fun plainKeys(type: KeyboardType = KeyboardType.Text, ime: ImeAction = ImeAction
 
 /** [initial] edits a saved machine; [prefill] only seeds the fields of a new one. */
 @Composable fun HostDialog(initial: HostProfile?, onDismiss: () -> Unit, onSave: (HostProfile) -> Unit, prefill: HostProfile? = null) {
+    if (initial?.paired == true) { PairedHostDialog(initial, onDismiss, onSave); return }
     val seed = initial ?: prefill
     var name by remember { mutableStateOf(seed?.name.orEmpty()) }; var host by remember { mutableStateOf(seed?.host.orEmpty()) }
     var user by remember { mutableStateOf(seed?.user.orEmpty()) }; var port by remember { mutableStateOf((seed?.port ?: 22).toString()) }

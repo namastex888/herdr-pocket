@@ -22,6 +22,16 @@ This is an independent prototype, not an official Herdr release.
 
 ## Connect your machine
 
+### Pair with Herdr desktop (no SSH)
+
+1. On the computer, add the [Pocket Link](https://github.com/namastex888/herdr-pocket-link) mod to Herdr desktop. It needs Node.js 20.3+.
+2. Open it with ⌘⌥P (Ctrl+Alt+P on Linux), then press **Turn on** and **Pair a phone**. A QR code appears.
+3. In the app, tap **Pair with Herdr desktop**, then **Scan the QR code**. You can also paste the link, or open it on the phone.
+
+The phone and the desktop dial each other by public key over [iroh](https://iroh.computer). The connection is direct on the same network or through hole punching, and otherwise goes through n0's public relays. It is end to end encrypted either way. The code works once, for 10 minutes. Removing the phone in Pocket Link disconnects it immediately. No port is opened on the computer, and no SSH or password is needed. Scanning uses a bundled scanner (ZXing), so it works without Google Play services; the app asks for the camera the first time.
+
+### Over SSH
+
 1. Install and run herdr-core on the host, or open Herdr desktop. `hc server status` should work. This client speaks protocol generation 1.
 2. Make SSH reachable from the phone, using your local network or Tailscale.
 3. Open **Herdr Pocket → Settings** and copy the public key. Add it as a line to the host user's `~/.ssh/authorized_keys`. Alternatively use SSH password authentication: the app asks for the password when the host rejects the key, and doesn't save it.
@@ -56,6 +66,7 @@ Tests select unique core sessions and temporary XDG state/config/runtime directo
 
 ## Current limits
 
+- Pocket Link pairing needs the desktop mod and Node.js 20.3+ on the computer; the bridge runs on macOS (LaunchAgent) and Linux (systemd user service).
 - Connections run in the app process. Background watching, push notifications, automatic reconnect, SSH jump hosts and imported SSH identities are not implemented.
 - Linux/macOS SSH hosts are supported. The connection command assumes a Unix shell; Windows hosts need a different launcher.
 - Space/tab layout is read from the desktop. This version does not edit, rename or delete that document or run desktop mods.
