@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import java.io.Closeable
@@ -65,6 +66,11 @@ object IrohLink {
         }
     }
 
+    /** Drops the endpoint after a connect timed out: one bound before a network change can stay deaf after it. */
+    private suspend fun forget(stale: Endpoint) = lock.withLock {
+        if (endpoint === stale) { endpoint = null; runCatching { stale.close() } }
+    }
+
     /** The desktop a ticket names, as a stable id for "is this the same machine". */
     fun desktopId(ticket: String): String = EndpointTicket.fromString(ticket).endpointAddr().id().toString()
 
@@ -84,7 +90,8 @@ object IrohLink {
     /** Opens a session to a paired desktop's core; [scope] carries the stream pumps and ends with the connection. */
     suspend fun open(context: Context, ticket: String, session: String, scope: CoroutineScope): IrohTransport {
         val ep = endpoint(context)
-        val conn = withTimeout(30_000) { ep.connect(EndpointTicket.fromString(ticket).endpointAddr(), SESSION) }
+        val conn = try { withTimeout(30_000) { ep.connect(EndpointTicket.fromString(ticket).endpointAddr(), SESSION) } }
+            catch (e: TimeoutCancellationException) { forget(ep); throw e }
         val bi = conn.openBi()
         val send = bi.send(); val recv = bi.recv()
         send.writeAll((JSONObject().put("session", session).toString() + "\n").toByteArray())

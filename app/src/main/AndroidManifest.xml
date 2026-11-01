@@ -1,5 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- Self-update from the GitHub releases: Android still asks before the first install, and again only on Android 11 and older. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
@@ -10,5 +13,10 @@
             <intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="herdr-pocket" android:host="pair"/></intent-filter>
         </activity>
         <receiver android:name=".UpdateReceiver" android:exported="false" />
+        <receiver android:name=".Notify$ReplyReceiver" android:exported="false" />
+        <!-- Keeps the person's own machines connected while they're away from the app, so agent alerts reach them. -->
+        <service android:name=".WatchService" android:exported="false" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Keeps the user's connections to their own computers open so a coding agent that needs them or finishes reaches them as a notification they can reply to." />
+        </service>
     </application>
 </manifest>

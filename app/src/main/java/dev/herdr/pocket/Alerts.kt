@@ -39,6 +39,26 @@ object Alerts {
         }
     }
 
+    /**
+     * The agents whose alert is over between [old] and [new]: they no longer need the person and aren't sitting on a
+     * finished turn (they answered elsewhere, started working again, or ended), so their notification goes.
+     */
+    fun resolved(old: List<CoreTerminal>?, new: List<CoreTerminal>, hostId: String, paned: (TerminalRef) -> Boolean): List<TerminalRef> {
+        if (old == null) return emptyList()
+        val words = words(new, hostId, paned)
+        return words(old, hostId, paned).filter { (address, word) -> word in ALERTING && words[address] !in ALERTING }.keys
+            .map { TerminalRef(hostId, it) }
+    }
+    private val ALERTING = setOf(BLOCKED, DONE)
+    /** Each live agent's word, with the sub-agent rule. */
+    private fun words(list: List<CoreTerminal>, hostId: String, paned: (TerminalRef) -> Boolean): Map<String, String> {
+        val live = list.filter { it.live }.associateBy { it.address }
+        return live.values.filter { it.status.isNotBlank() }.associate { t ->
+            val kid = t.parent.isNotBlank() && t.parent in live && !paned(TerminalRef(hostId, t.address))
+            t.address to if (kid) Cockpit.kidStatus(t, false) else Cockpit.status(t, false)
+        }
+    }
+
     /** Needs you sounds even when the person is looking; Done only when they aren't. The toast shows only when they aren't. */
     fun sounds(kind: String, looking: Boolean) = kind == BLOCKED || !looking
 
