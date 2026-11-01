@@ -4,6 +4,9 @@ name: Release
 # 0.N.0. The run gates it, commits "chore(release): v0.N.0" with version.properties, tags it, builds the
 # release-signed APK and publishes it as the Latest GitHub release with latest.json, which installed copies
 # read to update. Merges with only chore(release), ci, docs or test commits release nothing.
+# A release whose android/ is unchanged since the previous one (a Pocket Link or meter change) builds no app:
+# it carries the previous automagik.apk and latest.json forward, so phones see the same version and don't
+# update, while the meter binaries still ship.
 on:
   push:
     branches: [dev]
@@ -110,18 +113,31 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
+      - name: Did the app change
+        id: app
+        run: |
+          set -euo pipefail
+          if [ -n "$PREVIOUS" ] && git diff --quiet "$PREVIOUS" "v${VERSION}" -- android/; then
+            echo "same=true" >> "$GITHUB_OUTPUT"
+            echo "android/ is unchanged since ${PREVIOUS}: this release carries that app forward"
+          fi
+
       - uses: actions/setup-java@v4
+        if: steps.app.outputs.same != 'true'
         with:
           distribution: temurin
           java-version: '17'
 
       - uses: android-actions/setup-android@v3
+        if: steps.app.outputs.same != 'true'
         with:
           packages: 'platforms;android-35 build-tools;35.0.0'
 
       - uses: gradle/actions/setup-gradle@v4
+        if: steps.app.outputs.same != 'true'
 
       - name: Build the release APK
+        if: steps.app.outputs.same != 'true'
         working-directory: android
         env:
           KEYSTORE: ${{ secrets.POCKET_SIGNING_KEYSTORE }}
@@ -139,22 +155,35 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
+          SAME_APP: ${{ steps.app.outputs.same }}
         run: |
           set -euo pipefail
           tag="v${VERSION}"
-          meta=android/app/build/outputs/apk/release/output-metadata.json
-          code=$(jq -r '.elements[0].versionCode' "$meta")
-          name=$(jq -r '.elements[0].versionName' "$meta")
-          [ "$name" = "$VERSION" ] || { echo "::error::the APK says ${name}, the tag says ${VERSION}"; exit 1; }
-          cp android/app/build/outputs/apk/release/app-release.apk automagik.apk
-          sha=$(sha256sum automagik.apk | cut -d' ' -f1)
           # What shipped: the conventional subjects since the previous release, without the release commits.
           changes=$(git log --no-merges --format='- %s' "${PREVIOUS:+${PREVIOUS}..}${tag}" | grep -vE '^- chore\(release\)' | head -40 || true)
-          summary=$(printf '%s\n' "$changes" | head -5 | sed 's/^- //' | paste -sd ';' - | head -c 400)
-          jq -n --argjson code "$code" --arg name "$name" --arg sha "$sha" --arg notes "$summary" \
-            --arg url "https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/automagik.apk" \
-            '{versionCode: $code, versionName: $name, url: $url, sha256: $sha, notes: $notes}' > latest.json
-          printf '%s\n\nSHA-256 of `automagik.apk`: `%s`\n' "${changes:-- Maintenance.}" "$sha" > notes.md
+          if [ "$SAME_APP" = "true" ]; then
+            # The same APK and latest.json as the previous release (its url still points at the release that
+            # built it), so installed copies see no new version.
+            gh release download "$PREVIOUS" -p automagik.apk -p latest.json -D carried --repo "$GITHUB_REPOSITORY"
+            sha=$(sha256sum carried/automagik.apk | cut -d' ' -f1)
+            [ "$sha" = "$(jq -r '.sha256' carried/latest.json)" ] || { echo "::error::${PREVIOUS}'s automagik.apk doesn't match its latest.json"; exit 1; }
+            cp carried/automagik.apk carried/latest.json .
+            name=$(jq -r '.versionName' latest.json)
+            app="The app is unchanged: \`automagik.apk\` is still ${name}, so phones don't update."
+          else
+            meta=android/app/build/outputs/apk/release/output-metadata.json
+            code=$(jq -r '.elements[0].versionCode' "$meta")
+            name=$(jq -r '.elements[0].versionName' "$meta")
+            [ "$name" = "$VERSION" ] || { echo "::error::the APK says ${name}, the tag says ${VERSION}"; exit 1; }
+            cp android/app/build/outputs/apk/release/app-release.apk automagik.apk
+            sha=$(sha256sum automagik.apk | cut -d' ' -f1)
+            summary=$(printf '%s\n' "$changes" | head -5 | sed 's/^- //' | paste -sd ';' - | head -c 400)
+            jq -n --argjson code "$code" --arg name "$name" --arg sha "$sha" --arg notes "$summary" \
+              --arg url "https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/automagik.apk" \
+              '{versionCode: $code, versionName: $name, url: $url, sha256: $sha, notes: $notes}' > latest.json
+            app=""
+          fi
+          printf '%s\n\n%s%sSHA-256 of `automagik.apk`: `%s`\n' "${changes:-- Maintenance.}" "$app" "${app:+ }" "$sha" > notes.md
           gh release create "$tag" automagik.apk latest.json --verify-tag --latest \
             --title "Automagik Pocket ${VERSION}" --notes-file notes.md
 
