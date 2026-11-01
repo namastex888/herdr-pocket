@@ -1,7 +1,8 @@
 //! The per-machine SQLite store (WAL).
 //!
-//! - `usage`: `ae/1` `agent.usage` rows, one per rollup key and hour, upserted on their id. The
-//!   `ae_usage` view renders each row as an `ae/1` envelope.
+//! - `usage`: `ae/1` (revision 3) `agent.usage` rows, one per rollup key, hour and precision,
+//!   upserted on their id. The `ae_usage` view renders each row as an `ae/1` envelope: an exact
+//!   row carries the split fields, a total_only row carries `unsplit` alone.
 //! - `files`: how far each log has been read, plus what identifies it (device, inode, size, a hash
 //!   of its first bytes) so a rewritten or truncated file is noticed.
 //! - `seen`: a bounded set of dedupe-key hashes, oldest evicted first.
@@ -21,7 +22,9 @@ use crate::event::{Precision, RollupKey, Tokens, key_hash};
 use crate::sources::FileCtx;
 use crate::sources::codex::{CodexCtx, Cum};
 
-pub const SCHEMA_VERSION: i64 = 1;
+/// 2: precision is part of the row id (`ae/1` revision 3). A store of an older version is rebuilt
+/// once from the logs (`sync` resets it), because every row id changed.
+pub const SCHEMA_VERSION: i64 = 2;
 /// How many dedupe keys are kept. Claude repeats a message on adjacent lines, so the window only
 /// needs to cover a few days of messages; this covers several weeks on a busy machine.
 pub const SEEN_CAP: i64 = 600_000;
@@ -83,6 +86,8 @@ pub struct Attributed {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageRow {
+    /// The row's `idempotency_key`.
+    pub id: String,
     pub key: RollupKey,
     pub squad: Option<String>,
     pub tokens: Tokens,
@@ -145,10 +150,12 @@ CREATE VIEW ae_usage AS SELECT id, json_object(
                        'model', model, 'machine', machine),
   'work', json_object('repo', repo, 'branch', branch),
   'trust', 'agent',
-  'data', json_object('input_uncached', input_uncached, 'cache_read', cache_read,
-                      'cache_write_5m', cache_write_5m, 'cache_write_1h', cache_write_1h,
-                      'output', output, 'reasoning', reasoning, 'precision', precision,
-                      'unsplit', unsplit, 'reported_usd', reported_usd),
+  'data', CASE WHEN precision = 'total_only'
+    THEN json_object('precision', precision, 'unsplit', unsplit, 'reported_usd', reported_usd)
+    ELSE json_object('input_uncached', input_uncached, 'cache_read', cache_read,
+                     'cache_write_5m', cache_write_5m, 'cache_write_1h', cache_write_1h,
+                     'output', output, 'reasoning', reasoning, 'precision', precision,
+                     'reported_usd', reported_usd) END,
   'idempotency_key', id) AS envelope FROM usage;
 ";
 
@@ -221,7 +228,8 @@ impl Store {
         Ok(())
     }
 
-    /// Drops every row and offset so the next read imports again from `counted_from`.
+    /// Drops every row and offset so the next read imports again from `counted_from`, and marks
+    /// the store as the current version.
     pub fn reset(&mut self, counted_from_ms: i64) -> rusqlite::Result<()> {
         let tx = self.conn.transaction()?;
         tx.execute_batch(
@@ -231,6 +239,10 @@ impl Store {
         tx.execute(
             "INSERT INTO meta(k, v) VALUES('counted_from_ms', ?1) ON CONFLICT(k) DO UPDATE SET v = excluded.v",
             [counted_from_ms.to_string()],
+        )?;
+        tx.execute(
+            "INSERT INTO meta(k, v) VALUES('schema_version', ?1) ON CONFLICT(k) DO UPDATE SET v = excluded.v",
+            [SCHEMA_VERSION.to_string()],
         )?;
         tx.execute(
             "DELETE FROM meta WHERE k IN ('last_success_ms', 'last_pending_bytes',
@@ -322,7 +334,7 @@ impl Store {
         let tx = self.conn.transaction()?;
         let mut seq: i64 =
             tx.query_row("SELECT coalesce(max(seq), 0) FROM seen", [], |r| r.get(0))?;
-        let mut rows: BTreeMap<RollupKey, Pending> = BTreeMap::new();
+        let mut rows: BTreeMap<(RollupKey, Precision), Pending> = BTreeMap::new();
         {
             let mut ins = tx.prepare_cached("INSERT OR IGNORE INTO seen(k, seq) VALUES(?1, ?2)")?;
             let mut sess = tx.prepare_cached(
@@ -340,10 +352,9 @@ impl Store {
                     }
                 }
                 health.events += 1;
-                let entry = rows.entry(e.key.clone()).or_insert((
+                let entry = rows.entry((e.key.clone(), e.precision)).or_insert((
                     None,
                     Tokens::default(),
-                    Precision::Exact,
                     None,
                     0,
                 ));
@@ -351,13 +362,10 @@ impl Store {
                     entry.0.clone_from(&e.squad);
                 }
                 entry.1.add(&e.tokens);
-                if e.precision == Precision::TotalOnly {
-                    entry.2 = Precision::TotalOnly;
-                }
                 if let Some(usd) = e.reported_usd {
-                    entry.3 = Some(entry.3.unwrap_or(0.0) + usd);
+                    entry.2 = Some(entry.2.unwrap_or(0.0) + usd);
                 }
-                entry.4 += 1;
+                entry.3 += 1;
                 if let Some(s) = &e.session {
                     sess.execute(params![e.key.harness, s, e.parent_session, e.ts_ms])?;
                 }
@@ -430,11 +438,13 @@ impl Store {
         let mut st = self.conn.prepare(
             "SELECT bot, role, harness, model, machine, repo, branch, hour_ms, squad,
                     input_uncached, cache_read, cache_write_5m, cache_write_1h, output, reasoning,
-                    precision, reported_usd, events, unsplit
-             FROM usage WHERE hour_ms >= ?1 ORDER BY hour_ms, harness, model, repo, branch, bot, role",
+                    precision, reported_usd, events, unsplit, id
+             FROM usage WHERE hour_ms >= ?1
+             ORDER BY hour_ms, harness, model, repo, branch, bot, role, precision",
         )?;
         let rows = st.query_map([from_ms], |r| {
             Ok(UsageRow {
+                id: r.get(19)?,
                 key: RollupKey {
                     bot: r.get(0)?,
                     role: r.get(1)?,
@@ -556,11 +566,12 @@ fn put_thread(tx: &Transaction<'_>, t: &CodexCtx, path: Option<&str>) -> rusqlit
     Ok(())
 }
 
-type Pending = (Option<String>, Tokens, Precision, Option<f64>, i64);
+type Pending = (Option<String>, Tokens, Option<f64>, i64);
 
+/// Precision is part of the id, so a row never mixes exact and total_only usage.
 fn upsert_rows(
     tx: &Transaction<'_>,
-    rows: &BTreeMap<RollupKey, Pending>,
+    rows: &BTreeMap<(RollupKey, Precision), Pending>,
     now_ms: i64,
 ) -> rusqlite::Result<()> {
     let mut st = tx.prepare_cached(
@@ -577,15 +588,14 @@ fn upsert_rows(
            output = output + excluded.output,
            reasoning = reasoning + excluded.reasoning,
            unsplit = unsplit + excluded.unsplit,
-           precision = CASE WHEN excluded.precision = 'total_only' THEN 'total_only' ELSE precision END,
            reported_usd = CASE WHEN excluded.reported_usd IS NULL THEN reported_usd
                                ELSE coalesce(reported_usd, 0) + excluded.reported_usd END,
            events = events + excluded.events,
            updated_ms = excluded.updated_ms",
     )?;
-    for (k, (squad, t, precision, usd, n)) in rows {
+    for ((k, precision), (squad, t, usd, n)) in rows {
         st.execute(params![
-            k.id(),
+            k.id(*precision),
             k.hour_ms,
             k.bot,
             k.role,

@@ -12,7 +12,7 @@ use crate::prices::PriceTable;
 use crate::scan::{self, Candidate, Plan, ReadLimits, ReadOutcome};
 use crate::sources::Source;
 use crate::sources::codex::{self, State};
-use crate::store::{Attributed, FileState, Health, SEEN_CAP, Store};
+use crate::store::{Attributed, FileState, Health, SCHEMA_VERSION, SEEN_CAP, Store};
 use crate::summary::{self, SourceHealth};
 use crate::time::{DAY_MS, HOUR_MS, day_start};
 
@@ -355,6 +355,9 @@ pub fn run(opts: &Options) -> Result<Outcome, Error> {
 
     // The import window. Widening it (or --backfill) re-imports: rows are a projection.
     let stored = store.meta_i64("counted_from_ms")?;
+    // A store of an older version (row ids without precision) is rebuilt once over its window.
+    // The reset drops every old row in the same transaction, so no doc counts a token twice.
+    let outdated = store.meta_i64("schema_version")?.unwrap_or(0) < SCHEMA_VERSION;
     // A store that holds less than the default window (one filled when the default was 14 days)
     // widens once on its own: the installed trigger runs a plain `sync`.
     let wanted = if opts.backfill {
@@ -369,10 +372,11 @@ pub fn run(opts: &Options) -> Result<Outcome, Error> {
             store.reset(wanted)?;
             wanted
         }
-        Some(s) if wanted < s => {
-            store.reset(wanted)?;
+        Some(s) if wanted < s || outdated => {
+            let from = wanted.min(s);
+            store.reset(from)?;
             reimported = true;
-            wanted
+            from
         }
         Some(s) => s,
     };

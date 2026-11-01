@@ -34,6 +34,7 @@ fn row(
     tokens: Tokens,
 ) -> UsageRow {
     UsageRow {
+        id: String::new(),
         key: RollupKey {
             bot: None,
             role: None,

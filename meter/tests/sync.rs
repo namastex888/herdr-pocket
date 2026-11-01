@@ -423,7 +423,7 @@ fn hourly_upserts_are_idempotent() {
     env.run(&env.opts());
     let after = env.store().rows_since(i64::MIN).unwrap();
     assert_eq!(after.len(), 1);
-    assert_eq!(after[0].key.id(), before[0].key.id());
+    assert_eq!(after[0].id, before[0].id);
     assert_eq!(after[0].tokens, sum(&[&U1, &U2]));
     // The next hour is a new row.
     append(

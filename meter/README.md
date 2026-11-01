@@ -3,7 +3,7 @@
 `meter` counts the tokens coding agents use on one machine and publishes a small summary to that
 machine's herdr-core, where Pocket can read it. Design:
 [RFC 0005](../docs/rfcs/0005-usage-meter.md) (Draft). Rows follow `ae/1` (agent event envelope,
-revision 2, owned by automagik-herdr).
+revision 3, owned by automagik-herdr).
 
 It runs once and exits. It has no daemon, no listener and makes no network calls; the only process
 it talks to is the local `hc`.
@@ -58,10 +58,19 @@ One SQLite file (WAL) per machine:
 - `METER_STATE_DIR` overrides both.
 
 The directory is 0700 and the file 0600. Rows are hourly `agent.usage` rollups keyed by (bot, role,
-harness, model, machine, repo, branch, hour), with `input_uncached`, `cache_read`,
-`cache_write_5m`, `cache_write_1h`, `output`, `reasoning` (part of output), `unsplit` (tokens
-known only as a total) and `precision` (`total_only` when the row has `unsplit` tokens). The
-`ae_usage` view renders each row as an `ae/1` envelope. No prompt text, titles, file contents or
+harness, model, machine, repo, branch, hour, precision); the row id (`idempotency_key`) hashes all
+of it, so an hour has at most one `exact` row and one `total_only` row per key. The `ae_usage` view
+renders each row as an `ae/1` envelope:
+
+- `exact`: `input_uncached`, `cache_read`, `cache_write_5m`, `cache_write_1h`, `output` and
+  `reasoning` (part of output), and no `unsplit`.
+- `total_only`: `unsplit` (tokens known only as a total, never priced), and none of the split
+  fields.
+
+A store written by an older meter (row ids without precision) is rebuilt once from the logs on
+the next `sync`: the old rows are dropped in the same transaction that resets the offsets, so the
+doc never counts a token twice. Until the rebuild finishes, it is published with
+`complete: false`. No prompt text, titles, file contents or
 per-turn rows are stored, and no $ except omp's reported cost.
 
 - `repo` is `host/owner/repo` from the cwd's git remote, without credentials, port, query or

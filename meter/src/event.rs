@@ -46,7 +46,7 @@ impl Tokens {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Precision {
     /// The full split (uncached input, cache reads, cache writes, output) is known.
     Exact,
@@ -107,8 +107,9 @@ pub struct RollupKey {
 }
 
 impl RollupKey {
-    /// `idempotency_key` = hash of the rollup key + hour. The same hour always maps to the same row.
-    pub fn id(&self) -> String {
+    /// `idempotency_key` = hash of the rollup key + hour + precision (`ae/1` revision 3). The same
+    /// hour maps to at most one exact row and one total_only row.
+    pub fn id(&self, precision: Precision) -> String {
         let mut h = Sha256::new();
         for part in [
             self.bot.as_deref(),
@@ -129,6 +130,8 @@ impl RollupKey {
             h.update([0x1f]);
         }
         h.update(self.hour_ms.to_be_bytes());
+        h.update([0x1f]);
+        h.update(precision.as_str().as_bytes());
         hex(&h.finalize()[..16])
     }
 }
@@ -170,9 +173,11 @@ mod tests {
 
     #[test]
     fn row_id_is_stable_and_distinguishes_null_from_empty() {
-        assert_eq!(key(Some("main"), 0).id(), key(Some("main"), 0).id());
-        assert_ne!(key(Some("main"), 0).id(), key(Some("main"), 3_600_000).id());
-        assert_ne!(key(None, 0).id(), key(Some(""), 0).id());
+        let id = |k: RollupKey| k.id(Precision::Exact);
+        assert_eq!(id(key(Some("main"), 0)), id(key(Some("main"), 0)));
+        assert_ne!(id(key(Some("main"), 0)), id(key(Some("main"), 3_600_000)));
+        assert_ne!(id(key(None, 0)), id(key(Some(""), 0)));
+        assert_ne!(id(key(None, 0)), key(None, 0).id(Precision::TotalOnly));
     }
 
     #[test]

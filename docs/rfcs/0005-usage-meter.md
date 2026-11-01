@@ -10,7 +10,7 @@ pr: ""
 ## Summary
 
 A small Rust program, `meter/`, runs on each of the user's machines. It records the token usage
-of coding agents as `ae/1` (agent event envelope, revision 2, owned by automagik-herdr) rows in a
+of coding agents as `ae/1` (agent event envelope, revision 3, owned by automagik-herdr) rows in a
 SQLite file on that machine, and publishes a short summary as a herdr-core document. Pocket can
 then show usage by reading that document over the connection it already has. Nothing leaves the
 user's machines.
@@ -29,9 +29,10 @@ everything under Design and Alternatives is a proposal, not a decision.
   differ (one row per rollup hour rather than per event; the doc's fields), the code is current.
 - Codex: thread list from its state database (read-only, one query), usage from the running
   totals in each rollout. Threads with no rollout file are counted from `tokens_used` as
-  `total_only` (no split, no $); on a busy machine they can be a large share of usage. `ae/1`
-  revision 2 has no field for an unsplit total, so the meter adds `data.unsplit`; this needs to
-  go back to the envelope's owner.
+  `total_only` (no split, no $); on a busy machine they can be a large share of usage. They are
+  carried as `data.unsplit`, which `ae/1` revision 3 adopted: a row is either exact (split
+  fields) or total_only (`unsplit` only), and precision is part of the row id. A store from
+  before revision 3 is rebuilt once.
 - Summary doc schema version 2 (the phone's contract, in the README): per-project, per-task
   (repo + branch) and per-model 24 h / 7 d / 30 d windows, per-harness hourly (48 h) and daily
   (30 d) series. It fits 64 KiB by cutting the task list, then the project list, into `*_other`.
@@ -117,5 +118,5 @@ None yet.
 
 ## Related
 
-- `ae/1` (agent event envelope, revision 2, owned by automagik-herdr)
+- `ae/1` (agent event envelope, revision 3, owned by automagik-herdr)
 - [RFC 0004 — One repo](0004-monorepo.md)
