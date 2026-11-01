@@ -21,6 +21,7 @@
         </activity>
         <receiver android:name=".UpdateReceiver" android:exported="false" />
         <receiver android:name=".Notify$ReplyReceiver" android:exported="false" />
+        <receiver android:name=".Notify$ChoiceReceiver" android:exported="false" />
         <!-- Keeps the person's own machines connected while they're away from the app, so agent alerts reach them. -->
         <service android:name=".WatchService" android:exported="false" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Keeps the user's connections to their own computers open so a coding agent that needs them or finishes reaches them as a notification they can reply to." />

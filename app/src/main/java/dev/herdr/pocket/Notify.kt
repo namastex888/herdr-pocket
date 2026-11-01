@@ -42,12 +42,23 @@ object Notify {
     fun id(ref: TerminalRef) = "${ref.hostId}|${ref.address}".hashCode()
 
     /** [detail]: what it asks or said, and where it runs. [lockScreen]: Reply works without unlocking, and the content shows there. */
-    fun post(context: Context, alert: Alerts.Alert, detail: String, silent: Boolean, lockScreen: Boolean) =
-        post(context, alert.ref, alert.kind, alert.text, detail, silent, lockScreen, null)
+    /** [menu]: the options on the agent's screen, which become buttons (see [Prompt.choices]). */
+    fun post(context: Context, alert: Alerts.Alert, detail: String, silent: Boolean, lockScreen: Boolean, menu: Prompt.Menu? = null) =
+        post(context, alert.ref, alert.kind, alert.text, detail, silent, lockScreen, null,
+            Prompt.choices(alert.terminal.kind, menu), menu?.options.orEmpty(), alert.terminal.message)
 
     /** [sent]: a reply's outcome, shown in place of [detail] without alerting again. */
-    fun post(context: Context, ref: TerminalRef, kind: String, title: String, detail: String, silent: Boolean, lockScreen: Boolean, sent: String?) {
+    fun post(context: Context, ref: TerminalRef, kind: String, title: String, detail: String, silent: Boolean, lockScreen: Boolean, sent: String?,
+             choices: List<Prompt.Choice> = emptyList(), options: List<String> = emptyList(), msg: String = "") {
         if (!allowed(context)) return
+        // One button per option; each remembers the question and the whole menu, so a stale tap presses nothing.
+        val picks = choices.map { c ->
+            NotificationCompat.Action.Builder(R.drawable.ic_notify, c.label.take(40), PendingIntent.getBroadcast(context, id(ref) * 31 + c.index + 1,
+                Intent(context, ChoiceReceiver::class.java).putExtra(EXTRA_HOST, ref.hostId).putExtra(EXTRA_ADDRESS, ref.address).putExtra(EXTRA_TITLE, title)
+                    .putExtra(EXTRA_KIND, kind).putExtra(EXTRA_DETAIL, detail).putExtra(EXTRA_MSG, msg)
+                    .putStringArrayListExtra(EXTRA_OPTIONS, ArrayList(options)).putExtra(EXTRA_INDEX, c.index).putExtra(EXTRA_LABEL, c.label),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)).setAuthenticationRequired(!lockScreen).build()
+        }
         val reply = NotificationCompat.Action.Builder(R.drawable.ic_notify, "Reply", PendingIntent.getBroadcast(context, id(ref),
             Intent(context, ReplyReceiver::class.java).putExtra(EXTRA_HOST, ref.hostId).putExtra(EXTRA_ADDRESS, ref.address).putExtra(EXTRA_TITLE, title)
                 .putExtra(EXTRA_KIND, kind).putExtra(EXTRA_DETAIL, detail),
@@ -64,7 +75,7 @@ object Notify {
             .setVisibility(if (lockScreen) NotificationCompat.VISIBILITY_PUBLIC else NotificationCompat.VISIBILITY_PRIVATE)
             .setContentIntent(open(context, ref)).setAutoCancel(true)
             .setSilent(silent || sent != null).setOnlyAlertOnce(sent != null)
-            .addAction(reply).build()
+            .apply { picks.forEach(::addAction); if (picks.size < 3) addAction(reply) }.build()
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         runCatching { NotificationManagerCompat.from(context).notify(id(ref), n) }
     }
@@ -83,6 +94,30 @@ object Notify {
     }
 
     private const val EXTRA_KIND = "dev.herdr.pocket.kind"
+    private const val EXTRA_MSG = "dev.herdr.pocket.msg"
+    private const val EXTRA_OPTIONS = "dev.herdr.pocket.options"
+    private const val EXTRA_INDEX = "dev.herdr.pocket.index"
+    private const val EXTRA_LABEL = "dev.herdr.pocket.label"
+
+    /** An option's button: picks it in the agent, after checking the same question and menu are still there. */
+    class ChoiceReceiver : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val ref = opened(intent) ?: return
+            val title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
+            val kind = intent.getStringExtra(EXTRA_KIND) ?: Alerts.BLOCKED
+            val detail = intent.getStringExtra(EXTRA_DETAIL).orEmpty()
+            fun show(outcome: String) = post(context, ref, kind, title, detail, silent = true,
+                lockScreen = PocketViewModel.current?.state?.value?.lockAnswers ?: true, sent = outcome)
+            val vm = PocketViewModel.current ?: run { show("Not sent: open Herdr Pocket and connect first."); return }
+            val pending = goAsync()
+            scope.launch {
+                try {
+                    show(vm.choose(ref, intent.getStringExtra(EXTRA_MSG).orEmpty(), intent.getStringArrayListExtra(EXTRA_OPTIONS).orEmpty(),
+                        intent.getIntExtra(EXTRA_INDEX, -1), intent.getStringExtra(EXTRA_LABEL).orEmpty()))
+                } finally { pending.finish() }
+            }
+        }
+    }
     private const val EXTRA_DETAIL = "dev.herdr.pocket.detail"
 
     /** Reply: sends the typed text through the open connection and shows the outcome in the same notification. */
