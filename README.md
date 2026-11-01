@@ -15,6 +15,8 @@ This is an independent prototype, not an official Herdr release.
 - Type with the Android keyboard and use the key row: Esc, sticky **Ctrl** and **Alt** (they apply to the next key or typed letter), Tab, Shift+Tab, arrows, Enter, Ctrl+C, Home/End, Page Up/Down, common symbols and Paste. Arrows and paging repeat while held. Cursor keys and paste follow the program's application-cursor and bracketed-paste modes. The key row appears with the keyboard or terminal controls.
 - Pinch a terminal with two fingers to change its text size, or set it in Settings. The size is remembered.
 - Alerts, like the desktop's Settings > Alerts: while the app is connected, it plays a sound when an agent needs you, or finishes while you aren't looking at it, and shows a toast with **Open**. Turn sounds, Needs you and Done on or off in **Settings → Alerts**.
+- Android notifications when you aren't in the app: **Needs you** and **Done**, one per agent, with **Reply** (typed into the agent, and the outcome shows in the notification) and a tap that opens the agent. A notification goes away once the agent is answered elsewhere, starts working again, or you open it. **Answer from the lock screen** (on by default) shows what the agent asks on the lock screen and lets Reply work there without unlocking; turn it off to require unlocking.
+- **Watch in background** (on by default): while a machine is connected, a foreground service keeps the connections open with a "Watching N machines" notification; **Stop** there disconnects. A dropped connection comes back on its own (Pocket Link and key-based SSH; a password connection waits for you). In the background the app reads changes less often and skips git checks.
 - If a connection drops, the terminal and agent list show a **Reconnect** action; pull down on the agent list to refresh or retry.
 - Send a composed message through `terminal.send`, retaining the draft when a send is not confirmed.
 - Start a shell or command. From an existing space it creates a new tab visible in the desktop app through `herdr.space` / `herdr.tab` labels.
@@ -78,7 +80,7 @@ Tests select unique core sessions and temporary XDG state/config/runtime directo
 ## Current limits
 
 - Pocket Link pairing needs the desktop mod and Node.js 20.3+ on the computer; the bridge runs on macOS (LaunchAgent) and Linux (systemd user service).
-- Connections run in the app process. Background watching, Android notifications (alerts are in-app only), automatic reconnect, SSH jump hosts and imported SSH identities are not implemented.
+- Connections run in the app process; with Watch in background they stay open in a foreground service. If Android stops the service or the phone restarts, open the app and connect again. SSH jump hosts and imported SSH identities are not implemented.
 - Linux/macOS SSH hosts are supported. The connection command assumes a Unix shell; Windows hosts need a different launcher.
 - Space/tab layout is read from the desktop. This version does not edit, rename or delete that document or run desktop mods.
 - **Full color** uses a bundled, offline xterm.js WebView. **Native text**, selectable in Settings, renders the core’s screen snapshot directly in Compose, keeps the message and key controls, and activates automatically if the color renderer fails. Native text has no terminal colors; it keeps up to 500 lines of local shell history and sends scroll events to alternate-screen programs. Navigation, lists, settings, SSH and the core client are native Kotlin. Kitty images and Windows win32-input-mode are not supported.

@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.compose.LocalActivity
 import androidx.compose.ui.platform.LocalView
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import androidx.core.view.WindowCompat
@@ -11,8 +12,9 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.viewModels
 import android.content.Intent
+import android.os.Build
+import android.Manifest
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
@@ -49,7 +51,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -66,10 +67,10 @@ val Blocked = Color(0xfff0705f)
 val Done = Color(0xff76a8ff)
 
 class MainActivity : ComponentActivity() {
-    private val vm: PocketViewModel by viewModels()
+    private val vm get() = (application as PocketApplication).vm
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (savedInstanceState == null) openLink(intent)
+        if (savedInstanceState == null) { openLink(intent); openAlert(intent) }
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(0xff101114.toInt())
@@ -82,7 +83,13 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); openLink(intent) }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); openLink(intent); openAlert(intent) }
+    // A notification's tap opens its agent.
+    private fun openAlert(intent: Intent?) {
+        val ref = Notify.opened(intent) ?: return
+        vm.selectTerminal(ref)
+        setIntent(Intent(this, MainActivity::class.java))
+    }
     // A pairing link from outside the app is only offered: the person confirms it in the app.
     private fun openLink(intent: Intent?) {
         val link = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.dataString ?: return
@@ -103,7 +110,7 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable fun PocketApp(vm: PocketViewModel = viewModel()) {
+@Composable fun PocketApp(vm: PocketViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -157,6 +164,12 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
     }
     LifecycleResumeEffect(Unit) { activity?.let(Updater::resume); onPauseOrDispose { } }
     LifecycleStartEffect(Unit) { vm.setForeground(true); onStopOrDispose { vm.setForeground(false) } }
+    // Android 13+ asks before an app's first notification: once, when a machine first connects.
+    val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    val anyConnected = state.machines.values.any { it.connected }
+    LaunchedEffect(anyConnected) {
+        if (anyConnected && Build.VERSION.SDK_INT >= 33 && vm.shouldAskNotifications()) notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
     // The desktop's alert toast: clicking it goes to the agent.
     LaunchedEffect(state.alert) {
         val a = state.alert ?: return@LaunchedEffect
@@ -240,7 +253,7 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
             Box(Modifier.fillMaxSize().padding(padding)) {
                 when {
                     selected != null -> TerminalScreen(vm, state, terminal, space) { scope.launch { drawer.open() } }
-                    state.screen == "machines" -> MachinesScreen(state, nearby, onAdd = { addHost = true }, onPair = { pairDesktop = true }, onAddNearby = ::addNearby, onConnect = { vm.connect(it) }, onEdit = { editHost = it }, onDisconnect = vm::disconnect, onRemove = vm::removeHost)
+                    state.screen == "machines" -> MachinesScreen(state, nearby, onAdd = { addHost = true }, onPair = { pairDesktop = true }, onAddNearby = ::addNearby, onConnect = { vm.connect(it) }, onEdit = { editHost = it }, onDisconnect = { vm.disconnect(it) }, onRemove = vm::removeHost)
                     state.screen == "settings" -> SettingsScreen(state, vm)
                     state.machines.values.none { it.connected || it.terminals.isNotEmpty() } -> WelcomeScreen(state, nearby, onAdd = { addHost = true }, onPair = { pairDesktop = true }, onAddNearby = ::addNearby, onConnect = { vm.connect(it) }, onPreview = vm::enterDemo)
                     else -> OverviewScreen(state, space, vm, onAll = vm::showAll)

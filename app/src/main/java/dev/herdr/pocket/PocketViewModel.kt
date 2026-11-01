@@ -49,10 +49,15 @@ data class PocketState(
     val seen: Set<String> = emptySet(),
     /** Settings > Alerts, phone-local like the desktop's settings.json `sounds`. */
     val alertSounds: Boolean = true, val alertBlocked: Boolean = true, val alertDone: Boolean = true,
+    /** Notifications show their content on the lock screen, and Reply works there without unlocking. */
+    val lockAnswers: Boolean = true,
+    /** Keep connections open in the background ([WatchService]) so alerts arrive as notifications. */
+    val watch: Boolean = true,
     /** An agent that needs the person or finished, for the toast that opens it. */
     val alert: Alerts.Alert? = null
 )
 const val DEFAULT_FONT_SIZE = 13
+private val RECONNECT_DELAYS = listOf(2_000L, 5_000L, 15_000L, 30_000L, 60_000L)
 val FONT_SIZES = 8..24
 
 class PocketViewModel(application: Application) : AndroidViewModel(application) {
@@ -62,6 +67,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     private val _state = MutableStateFlow(PocketState(nativeDisplay = prefs.getBoolean("native_display", false),
         fontSize = prefs.getInt("font_size", DEFAULT_FONT_SIZE).coerceIn(FONT_SIZES), folded = prefs.getStringSet("folded_machines", null).orEmpty().toSet(),
         alertSounds = prefs.getBoolean("alert_sounds", true), alertBlocked = prefs.getBoolean("alert_blocked", true), alertDone = prefs.getBoolean("alert_done", true),
+        lockAnswers = prefs.getBoolean("lock_answers", true), watch = prefs.getBoolean("watch_background", true),
         seen = runCatching { JSONArray(prefs.getString("seen_done", "[]")).let { a -> (0 until a.length()).map(a::getString) }.toSet() }.getOrDefault(emptySet()), hosts = runCatching {
         JSONArray(prefs.getString("hosts", "[]")).objects().map(HostProfile::parse)
     }.getOrDefault(emptyList())))
@@ -100,7 +106,13 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     @Volatile private var modes = TerminalModes()
     private val keystrokes = Channel<Pair<Pair<CoreClient, Int>, ByteArray>>(64)
 
+    companion object {
+        /** The live instance, for notification actions that arrive outside the activity. */
+        @Volatile var current: PocketViewModel? = null
+    }
     init {
+        current = this
+        Notify.channels(application)
         viewModelScope.launch(Dispatchers.IO) {
             for ((target, bytes) in keystrokes) {
                 if (activeChannel === target) runCatching { target.first.send(target.second, Wire.DATA, bytes) }
@@ -116,7 +128,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             while (true) {
                 withTimeoutOrNull(15_000) { gitWake.receive() }
-                for ((id, client) in clients.entries.toList()) runCatching { gitPass(id, client) }
+                if (foreground) for ((id, client) in clients.entries.toList()) runCatching { gitPass(id, client) }
             }
         }
     }
@@ -148,6 +160,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun setTerminalFullscreen(fullscreen: Boolean) { _state.update { it.copy(terminalFullscreen = fullscreen) } }
     fun selectTerminal(ref: TerminalRef) {
+        Notify.cancel(getApplication(), ref)
         if (state.value.selected == ref) return
         detach()
         val space = state.value.machines[ref.hostId]?.spaces?.find { ref.address in it.addresses }
@@ -156,8 +169,9 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     fun backToList() { detach(); _state.update { it.copy(selected = null, terminalStatus = "") } }
     fun showAll() { detach(); _state.update { it.copy(screen = "overview", selected = null, space = null) } }
 
-    fun connect(profile: HostProfile, password: String? = null) {
-        disconnect(profile.id)
+    /** [retry]: a background reconnect's attempt number; a failure schedules the next. */
+    fun connect(profile: HostProfile, password: String? = null, retry: Int = 0) {
+        disconnect(profile.id, deliberate = retry == 0)
         _state.update { if (it.passwordPrompt?.hostId == profile.id) it.copy(passwordPrompt = null) else it }
         if (state.value.demo) leaveDemo()
         if (!password.isNullOrBlank()) temporaryPasswords[profile.id] = password
@@ -176,39 +190,50 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
                     CoreClient(t.input, t.output, t, connectionScope) { reason -> lost(profile, reason) }
                 }
                 client = c
-                val hello = c.start()
+                val hello = withTimeout(20_000) { c.start() }
                 ensureActive()
                 clients[profile.id] = c
                 gitChecked.keys.removeIf { it.startsWith("${profile.id}|") }
                 temporaryPasswords.remove(profile.id)
+                // A password isn't kept, so such a connection isn't retried on its own.
+                if (password.isNullOrBlank()) passwordHosts.remove(profile.id) else passwordHosts.add(profile.id)
+                retrying.remove(profile.id)
                 updateMachine(profile.id) { it.copy(connecting = false, connected = true, version = hello.optString("version"), error = null, session = it.session + 1) }
                 val changes = Channel<Unit>(Channel.CONFLATED)
                 c.subscribe { changes.trySend(Unit) }
                 refresh(profile.id, c)
                 for (ignored in changes) {
-                    delay(180)
+                    // Away from the app, fewer reads: the alert is what matters, not every redraw.
+                    delay(if (foreground) 180 else 1_500)
                     runCatching { refresh(profile.id, c) }.onFailure { e -> updateMachine(profile.id) { it.copy(error = e.message) } }
                 }
             } catch (e: Throwable) {
                 client?.close()
-                if (e is CancellationException) throw e
+                // A timeout is a failed attempt like any other (and is retried); only a real cancel ends quietly.
+                if (e is CancellationException && e !is TimeoutCancellationException) throw e
                 var cause: Throwable? = e
                 while (cause != null && cause !is HostTrustRequired) cause = cause.cause
                 if (cause is HostTrustRequired) _state.update { it.copy(trust = cause as HostTrustRequired) }
                 else if (e.isAuthFailure()) {
-                    temporaryPasswords.remove(profile.id)
+                    temporaryPasswords.remove(profile.id); retrying.remove(profile.id)
                     val rejected = !password.isNullOrBlank()
                     updateMachine(profile.id) { it.copy(needsPassword = true, error = if (rejected) "The host didn’t accept that password." else "The host didn’t accept this phone’s key.") }
                     // Keep a prompt already open for another machine; this one can be retried from its banner.
                     _state.update { if (it.passwordPrompt == null || it.passwordPrompt.hostId == profile.id) it.copy(passwordPrompt = PasswordPrompt(profile.id, rejected)) else it }
                 }
-                else { temporaryPasswords.remove(profile.id); updateMachine(profile.id) { it.copy(error = e.message ?: "Connection failed") } }
+                else {
+                    val reason = if (e is TimeoutCancellationException) "The machine didn’t answer in time." else e.message ?: "Connection failed"
+                    temporaryPasswords.remove(profile.id); updateMachine(profile.id) { it.copy(error = reason) }
+                    if (retry > 0) reconnectLater(profile, retry)
+                }
                 updateMachine(profile.id) { it.copy(connecting = false, connected = false) }
             }
         }
     }
     private fun lost(profile: HostProfile, reason: String) {
+        val unexpected = jobs[profile.id]?.isActive == true
         clients.remove(profile.id)
+        if (unexpected && profile.id !in passwordHosts) reconnectLater(profile, 1)
         updateMachine(profile.id) { it.copy(connected = false, connecting = false, error = "Disconnected: $reason") }
         if (state.value.selected?.hostId == profile.id) _state.update { it.copy(terminalStatus = "Disconnected") }
     }
@@ -278,7 +303,10 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     fun toggleCtrl() { _state.update { it.copy(modifiers = it.modifiers.copy(ctrl = !it.modifiers.ctrl)) } }
     fun toggleAlt() { _state.update { it.copy(modifiers = it.modifiers.copy(alt = !it.modifiers.alt)) } }
     fun rejectHost() { state.value.trust?.profile?.id?.let { temporaryPasswords.remove(it) }; _state.update { it.copy(trust = null) } }
-    fun disconnect(id: String) {
+    /** [deliberate]: the person asked, so a background reconnect in progress ends too. */
+    fun disconnect(id: String, deliberate: Boolean = true) {
+        reconnects.remove(id)?.cancel()
+        if (deliberate) retrying.remove(id)
         temporaryPasswords.remove(id)
         if (state.value.selected?.hostId == id) detach()
         jobs.remove(id)?.cancel()
@@ -288,17 +316,91 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     }
     private fun updateMachine(id: String, transform: (MachineState) -> MachineState) {
         _state.update { it.copy(machines = it.machines + (id to transform(it.machines[id] ?: MachineState()))) }
+        syncWatch()
+    }
+    private val reconnects = ConcurrentHashMap<String, Job>()
+    private val passwordHosts = ConcurrentHashMap.newKeySet<String>()
+    /** Machines coming back on their own, so the watch service keeps running between attempts. */
+    private val retrying = ConcurrentHashMap.newKeySet<String>()
+    /** A dropped connection comes back on its own while watching: after 2 s, then longer, up to a minute between tries. */
+    private fun reconnectLater(profile: HostProfile, attempt: Int) {
+        if (!state.value.watch || state.value.demo) return
+        retrying.add(profile.id)
+        reconnects.remove(profile.id)?.cancel()
+        reconnects[profile.id] = viewModelScope.launch {
+            delay(RECONNECT_DELAYS[(attempt - 1).coerceIn(0, RECONNECT_DELAYS.lastIndex)])
+            reconnects.remove(profile.id)
+            state.value.hosts.find { it.id == profile.id }?.let { connect(it, retry = attempt + 1) }
+        }
+        syncWatch()
+    }
+    @Volatile private var watchText = ""
+    /** Runs [WatchService] while a machine is connected (or coming back), with how many agents need the person. */
+    private fun syncWatch() {
+        val s = state.value
+        val app = getApplication<Application>()
+        val machines = s.machines.values.count { it.connected }
+        if (!s.watch || s.demo || (machines == 0 && retrying.isEmpty() && s.machines.values.none { it.connecting })) {
+            watchText = ""; WatchService.stop(app); return
+        }
+        val needYou = s.machines.values.sumOf { m -> m.terminals.count { it.live && it.attention && it.parent.isBlank() } }
+        val text = if (machines == 0) "Reconnecting…" else WatchService.summary(machines, needYou)
+        if (text == watchText) return
+        watchText = text
+        WatchService.show(app, text, foreground)
+    }
+    fun setWatch(on: Boolean) {
+        prefs.edit { putBoolean("watch_background", on) }
+        _state.update { it.copy(watch = on) }
+        if (!on) { reconnects.values.forEach { it.cancel() }; reconnects.clear(); retrying.clear() }
+        watchText = ""; syncWatch()
+    }
+    /** The watch notification's Stop: disconnect everything and stay disconnected until the person connects again. */
+    fun stopWatching() {
+        reconnects.values.forEach { it.cancel() }; reconnects.clear(); retrying.clear()
+        state.value.machines.keys.forEach { disconnect(it) }
+        watchText = ""
     }
     private val alertBase = ConcurrentHashMap<String, Pair<CoreClient, List<CoreTerminal>>>()
     @Volatile private var foreground = false
-    fun setForeground(shown: Boolean) { foreground = shown }
+    fun setForeground(shown: Boolean) {
+        foreground = shown
+        // Android lets the watch service start only from the foreground.
+        if (shown) { watchText = ""; syncWatch() }
+    }
     private fun alert(found: List<Alerts.Alert>) {
         val s = state.value
         val wanted = found.filter { if (it.kind == Alerts.BLOCKED) s.alertBlocked else s.alertDone }
         if (wanted.isEmpty() || s.demo) return
+        val app = getApplication<Application>()
+        // Away from the app, Android notifications carry the alert and their channel's sound.
+        if (!foreground && Notify.allowed(app)) {
+            wanted.forEach { a -> Notify.post(app, a, detail(a), silent = !s.alertSounds, lockScreen = s.lockAnswers) }
+            return
+        }
         fun looking(a: Alerts.Alert) = foreground && s.selected == a.ref
-        if (s.alertSounds && wanted.any { Alerts.sounds(it.kind, looking(it)) }) Alerts.play(getApplication())
+        if (s.alertSounds && wanted.any { Alerts.sounds(it.kind, looking(it)) }) Alerts.play(app)
         if (foreground) wanted.filterNot(::looking).maxByOrNull { if (it.kind == Alerts.BLOCKED) 1 else 0 }?.let { a -> _state.update { it.copy(alert = a) } }
+    }
+    /** What a notification says under its title: what the agent asks or said, and where it runs. */
+    private fun detail(a: Alerts.Alert): String {
+        val where = state.value.machines[a.ref.hostId]?.spaces?.find { a.ref.address in it.addresses }?.name ?: hostName(a.ref.hostId)
+        val what = a.terminal.message.ifBlank { if (a.kind == Alerts.BLOCKED) statusLabel("blocked", a.terminal.kind) else "Finished its turn" }
+        return "$what · $where"
+    }
+    /** True once: the first time a machine connects and notifications aren't allowed yet. */
+    fun shouldAskNotifications(): Boolean {
+        if (Notify.allowed(getApplication()) || prefs.getBoolean("asked_notifications", false)) return false
+        prefs.edit { putBoolean("asked_notifications", true) }; return true
+    }
+    fun setLockAnswers(on: Boolean) { prefs.edit { putBoolean("lock_answers", on) }; _state.update { it.copy(lockAnswers = on) } }
+    /** A notification's Reply: typed into the agent like the composer; returns what to show in the notification. */
+    suspend fun reply(ref: TerminalRef, text: String): String {
+        val c = clients[ref.hostId] ?: return "Not sent: ${hostName(ref.hostId)} isn’t connected. Open Herdr Pocket to reconnect."
+        return withTimeoutOrNull(8_000) {
+            runCatching { c.call("terminal.send", JSONObject().put("terminal", ref.address).put("text", text)) }
+                .fold({ "You: $text" }, { e -> "Not sent: ${e.message ?: "the core refused it"}" })
+        } ?: "Not confirmed: check the terminal before sending again."
     }
     fun dismissAlert(shown: Alerts.Alert) { _state.update { if (it.alert === shown) it.copy(alert = null) else it } }
     fun setAlerts(sounds: Boolean = state.value.alertSounds, blocked: Boolean = state.value.alertBlocked, done: Boolean = state.value.alertDone) {
@@ -326,6 +428,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         val paned = spaces.flatMap { it.addresses }.toSet()
         updateMachine(id) { it.copy(terminals = terminals, spaces = spaces, linked = linked, error = null) }
         alert(Alerts.changes(previous, terminals, id) { it.address in paned })
+        Alerts.resolved(previous, terminals, id) { it.address in paned }.forEach { Notify.cancel(getApplication(), it) }
         rememberLinked(id, linked.map { it.name })
         // The desktop assigns colours as spaces appear; read them again now and then, never write them.
         val now = System.currentTimeMillis()
@@ -602,7 +705,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
         _state.update { it.copy(seen = seen) }
     }
     fun enterDemo() {
-        clients.keys.toList().forEach(::disconnect)
+        clients.keys.toList().forEach { disconnect(it) }
         val id = "preview"
         val terminals = listOf(
             CoreTerminal("t1", "Authentication flow", "~/work/herdr", "live", "blocked", "Claude Code", "Waiting for your approval to run the test suite", 80, 24),
@@ -616,5 +719,5 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun leaveDemo() { detach(); _state.update { it.copy(demo = false, machines = emptyMap(), selected = null, space = null) } }
     fun hostName(hostId: String) = if (state.value.demo) "Preview machine" else state.value.hosts.find { it.id == hostId }?.name ?: "Machine"
-    override fun onCleared() { discovery.stop(); clients.values.forEach { it.close() }; clients.clear() }
+    override fun onCleared() { if (current === this) current = null; discovery.stop(); clients.values.forEach { it.close() }; clients.clear() }
 }

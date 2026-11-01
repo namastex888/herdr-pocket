@@ -9,6 +9,8 @@ import java.util.Locale
 
 /** Keeps the last crash's stack trace on the phone, so the person can copy it from Settings → About. */
 class PocketApplication : Application() {
+    /** One for the whole process, so the watch service keeps the connections when the screen goes away. */
+    val vm by lazy { PocketViewModel(this) }
     override fun onCreate() {
         super.onCreate()
         CrashLog.install(this)

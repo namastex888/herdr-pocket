@@ -159,15 +159,17 @@ fun NearbyHost.prefill() = HostProfile("", name, host, "", port)
         AlertRow("Sounds", "Play a sound when an agent needs you, or finishes while you aren’t looking at it.", state.alertSounds, onPlay = vm::playAlert) { vm.setAlerts(sounds = it) }
         AlertRow("Needs you", "When an agent asks something or waits for approval.", state.alertBlocked) { vm.setAlerts(blocked = it) }
         AlertRow("Done", "When an agent finishes a turn while you aren’t looking at it.", state.alertDone) { vm.setAlerts(done = it) }
+        AlertRow("Watch in background", "Keep your machines connected when you leave the app, so alerts still arrive. Android shows a “Watching” notification meanwhile.", state.watch) { vm.setWatch(it) }
+        AlertRow("Answer from the lock screen", "Notifications show what the agent asks on the lock screen, and Reply works there without unlocking.", state.lockAnswers) { vm.setLockAnswers(it) }
         Spacer(Modifier.height(4.dp))
-        Text("Alerts come while Herdr Pocket is connected. Tap Open on one to go to its agent.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
+        Text("In the app, an alert is a sound and a toast; tap Open to go to its agent. Away from it, alerts are Android notifications you can reply to. They come while Herdr Pocket is connected.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
         Spacer(Modifier.height(34.dp)); HorizontalDivider(color = Border); Spacer(Modifier.height(26.dp))
         SmallLabel("About"); Spacer(Modifier.height(15.dp))
         Row(verticalAlignment = Alignment.CenterVertically) { Brand(36); Spacer(Modifier.width(12.dp)); Column { Text("Herdr Pocket", fontWeight = FontWeight.SemiBold); Text("${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · Android companion", color = Muted, fontSize = 12.sp) } }
         Spacer(Modifier.height(16.dp)); UpdateRow()
         CrashRow()
         Spacer(Modifier.height(18.dp)); Text("A native companion for your existing herdr-core. Graphite colors, spaces and tabs follow the desktop’s design.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
-        Spacer(Modifier.height(10.dp)); Text("Connections run while the app is open. Android may close them in the background; pull down on the agent list or tap Reconnect. Your remote programs keep running.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
+        Spacer(Modifier.height(10.dp)); Text("With Watch in background on, connections stay open while you’re away and come back on their own after a drop. Otherwise Android may close them; pull down on the agent list or tap Reconnect. Your remote programs keep running.", color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
         Spacer(Modifier.height(20.dp)); TextButton(onClick = vm::enterDemo, contentPadding = PaddingValues(0.dp)) { Text("Explore the interface with sample data", fontSize = 13.sp) }
     }
 }
