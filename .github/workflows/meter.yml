@@ -1,0 +1,64 @@
+name: Meter
+
+# The usage meter (meter/): format, lint and test on Linux and macOS. Runs only when the meter or
+# this workflow changes.
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'meter/**'
+      - '.github/workflows/meter.yml'
+  pull_request:
+    paths:
+      - 'meter/**'
+      - '.github/workflows/meter.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: fmt, clippy, test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: meter
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+          cargo --version
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            meter/target
+          key: meter-${{ runner.os }}-${{ hashFiles('meter/Cargo.lock') }}
+          restore-keys: meter-${{ runner.os }}-
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --locked
