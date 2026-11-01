@@ -1,0 +1,11 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The self-updater's receivers, next to their classes in src/github: the play flavor has neither
+         (docs/rfcs/0006-distribution-flavors.md). Its permissions are in src/main, removed by src/play. -->
+    <application>
+        <receiver android:name=".UpdateReceiver" android:exported="false" />
+        <!-- Android starts the new build right after an update, so "Updated to" shows without waiting for the next open. -->
+        <receiver android:name=".UpdatedReceiver" android:exported="false">
+            <intent-filter><action android:name="android.intent.action.MY_PACKAGE_REPLACED" /></intent-filter>
+        </receiver>
+    </application>
+</manifest>
