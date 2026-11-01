@@ -42,10 +42,12 @@ Nothing else is collected. We, the developers, receive none of this data.
    key. When no direct path exists, the encrypted traffic passes through relay servers run by n0
    (the iroh project). Relays forward the encrypted bytes; they can't read them, though they do
    see the network addresses involved.
-3. **GitHub.** At every launch, and when you tap **Settings → About → Check for updates**, the app
-   downloads `latest.json` from this repo's latest GitHub release. If you install an update it
-   downloads the APK from GitHub too. GitHub sees your IP address and a User-Agent with the app
-   version. This check can't be turned off in the current version.
+3. **GitHub.** When the app opens (at most every 15 minutes), every 6 hours while it or **Watch in
+   background** runs, and when you tap **Settings → About → Check for updates**, the app downloads
+   `latest.json` from this repo's latest GitHub release. When a newer version is out it downloads
+   the APK from GitHub too: on its own on Wi-Fi with **Install updates automatically** on, otherwise
+   when you tap **Install**. GitHub sees your IP address and a User-Agent with the app version. The
+   check itself can't be turned off in the current version.
 4. **Your local network.** While the welcome screen or the Machines screen is open, the app looks
    for SSH servers advertised on the local network (mDNS, `_ssh._tcp`) to suggest them. It sends
    nothing to them until you connect.
@@ -101,6 +103,7 @@ phone. No picture is stored or sent.
 | Microphone | Speak a message in the side-button panel |
 | Camera | Scan the pairing QR code (added by the ZXing scanner library) |
 | Install packages, update without asking again | Install updates from GitHub releases; Android asks once |
+| Network state | Download automatic updates only on Wi-Fi and other unmetered networks |
 
 ## Children
 

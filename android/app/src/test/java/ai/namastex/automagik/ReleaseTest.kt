@@ -25,6 +25,12 @@ class ReleaseTest {
         assertEquals(sha, Release.parse(json(hash = "A".repeat(64)))!!.sha256)
     }
 
+    @Test fun takesHttpOnlyFromALocalTestServer() {
+        assertNull(Release.parse(json(url = "http://10.0.2.2:8000/a.apk"), cleartext = false))
+        assertEquals("http://10.0.2.2:8000/a.apk", Release.parse(json(url = "http://10.0.2.2:8000/a.apk"), cleartext = true)!!.url)
+        assertNull(Release.parse(json(url = "ftp://example.com/a.apk"), cleartext = true))
+    }
+
     @Test fun offersOnlyNewerBuilds() {
         val r = Release.parse(json())!!
         assertTrue(Updater.isNewer(r, 912344)); assertFalse(Updater.isNewer(r, 912345)); assertFalse(Updater.isNewer(r, 999999))
