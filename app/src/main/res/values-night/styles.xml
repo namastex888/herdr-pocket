@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.Herdr" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item><item name="android:windowLightStatusBar">false</item><item name="android:windowActionModeOverlay">true</item><item name="android:colorAccent">#7fd8ea</item><item name="android:windowBackground">#1e1923</item>
+    </style>
+    <style name="Theme.Herdr.Assist" parent="Theme.Herdr">
+        <item name="android:windowIsTranslucent">true</item><item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowAnimationStyle">@android:style/Animation.Translucent</item>
+    </style>
+</resources>

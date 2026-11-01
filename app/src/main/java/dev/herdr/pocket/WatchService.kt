@@ -67,11 +67,11 @@ class WatchService : Service() {
         private fun notification(context: Context, summary: String): android.app.Notification {
             context.getSystemService(NotificationManager::class.java).createNotificationChannel(
                 NotificationChannel(CHANNEL, "Watching machines", NotificationManager.IMPORTANCE_LOW).apply {
-                    description = "Shown while Herdr Pocket keeps your machines connected in the background."; setShowBadge(false) })
+                    description = "Shown while Automagik keeps your machines connected in the background."; setShowBadge(false) })
             val open = PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
             val stop = PendingIntent.getService(context, 1, Intent(context, WatchService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE)
-            return NotificationCompat.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_notify).setColor(0xff96b2d7.toInt())
-                .setContentTitle("Herdr Pocket").setContentText(summary.ifBlank { "Watching your machines" })
+            return NotificationCompat.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_notify).setColor(BrandArgb)
+                .setContentTitle("Automagik").setContentText(summary.ifBlank { "Watching your machines" })
                 .setOngoing(true).setSilent(true).setShowWhen(false).setContentIntent(open)
                 .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
                 .addAction(R.drawable.ic_notify, "Stop", stop).build()

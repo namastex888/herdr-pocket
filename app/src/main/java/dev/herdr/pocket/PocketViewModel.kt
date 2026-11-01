@@ -397,7 +397,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
      * [options] on screen; otherwise nothing is sent. Returns what to show in the notification.
      */
     suspend fun choose(ref: TerminalRef, msg: String, options: List<String>, index: Int, label: String): String {
-        val c = clients[ref.hostId] ?: return "Not sent: ${hostName(ref.hostId)} isn’t connected. Open Herdr Pocket to reconnect."
+        val c = clients[ref.hostId] ?: return "Not sent: ${hostName(ref.hostId)} isn’t connected. Open Automagik to reconnect."
         if (index !in options.indices) return "Not sent: open the agent to answer."
         return withTimeoutOrNull(8_000) {
             runCatching {
@@ -424,7 +424,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     fun setLockAnswers(on: Boolean) { prefs.edit { putBoolean("lock_answers", on) }; _state.update { it.copy(lockAnswers = on) } }
     /** A notification's Reply: typed into the agent like the composer; returns what to show in the notification. */
     suspend fun reply(ref: TerminalRef, text: String): String {
-        val c = clients[ref.hostId] ?: return "Not sent: ${hostName(ref.hostId)} isn’t connected. Open Herdr Pocket to reconnect."
+        val c = clients[ref.hostId] ?: return "Not sent: ${hostName(ref.hostId)} isn’t connected. Open Automagik to reconnect."
         return withTimeoutOrNull(8_000) {
             runCatching { c.call("terminal.send", JSONObject().put("terminal", ref.address).put("text", text)) }
                 .fold({ "You: $text" }, { e -> "Not sent: ${e.message ?: "the core refused it"}" })
@@ -546,7 +546,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
             val rev = ++attachRevision
             resetTerminal?.invoke(rev)
             val t = state.value.machines[selected.hostId]?.terminals?.find { it.address == selected.address }
-            terminalBytes?.invoke(rev, -1, ("\u001b[38;2;150;178;215mHerdr Pocket\u001b[0m  ·  Interface preview\r\n\r\n" +
+            terminalBytes?.invoke(rev, -1, ("\u001b[38;2;127;216;234mAutomagik\u001b[0m  ·  Interface preview\r\n\r\n" +
                 "\u001b[38;2;166;189;145m❯\u001b[0m ${t?.agent ?: "shell"}\r\n\r\n" +
                 "  \u001b[1m${t?.title}\u001b[0m\r\n\r\n  ${t?.message ?: "Ready for your next task."}\r\n\r\n" +
                 "  This is sample output. Connect your machine for a live terminal.\r\n\r\n").toByteArray())
@@ -595,7 +595,7 @@ class PocketViewModel(application: Application) : AndroidViewModel(application) 
     }
     fun nativeReady(columns: Int, lines: Int) {
         if (state.value.demo) {
-            _state.update { it.copy(screenText = "Herdr Pocket · Interface preview\n\nThis is sample output.\nConnect your machine for a live terminal.", terminalStatus = "Preview • sample output") }
+            _state.update { it.copy(screenText = "Automagik · Interface preview\n\nThis is sample output.\nConnect your machine for a live terminal.", terminalStatus = "Preview • sample output") }
             return
         }
         val ref = state.value.selected ?: return

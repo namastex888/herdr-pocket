@@ -93,7 +93,7 @@ import kotlin.math.roundToInt
     LaunchedEffect(showComposer) { if (showComposer) { composerFocus.requestFocus(); keyboard?.show() } }
     val machine = state.machines[ref.hostId]
     val offline = !state.demo && machine?.connected != true
-    Box(Modifier.fillMaxSize().background(Surface).displayCutoutPadding()) {
+    Box(Modifier.fillMaxSize().background(TermBg).displayCutoutPadding()) {
         Column(Modifier.fillMaxSize()) {
             if (!fullscreen) TerminalTabs(vm, state, space)
             // A new connection session recreates the view, which attaches the terminal again.
@@ -251,7 +251,7 @@ private fun openInBrowser(context: Context, url: String) {
     val size = pinchSize ?: fontSize
     val currentSize by rememberUpdatedState(fontSize)
     val lineSp = (size * 18f / 13f).sp
-    val style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = size.sp, lineHeight = lineSp, letterSpacing = 0.sp, color = Color(0xffd2d4d9))
+    val style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = size.sp, lineHeight = lineSp, letterSpacing = 0.sp, color = TermInk)
     val measure = rememberTextMeasurer()
     val width = measure.measure("M", style).size.width.coerceAtLeast(1)
     val density = LocalDensity.current
@@ -321,7 +321,7 @@ private fun openInBrowser(context: Context, url: String) {
             }
         }
     }
-    Box(modifier.background(Surface).onSizeChanged { viewport = it }.then(pinch).padding(8.dp)) {
+    Box(modifier.background(TermBg).onSizeChanged { viewport = it }.then(pinch).padding(8.dp)) {
         SelectionContainer {
             Text(linked, style = style, softWrap = false,
                 modifier = Modifier.fillMaxSize().then(gestures).horizontalScroll(horizontal))
@@ -346,7 +346,7 @@ private fun openInBrowser(context: Context, url: String) {
         var disposed = false
         val selectedAtCreation = vm.state.value.selected
         val loader = WebViewAssetLoader.Builder().addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context)).build()
-        webView.setBackgroundColor(0xff17191d.toInt())
+        webView.setBackgroundColor(TermBgArgb)
         webView.settings.apply {
             javaScriptEnabled = true; domStorageEnabled = false
             allowFileAccess = false; allowContentAccess = false

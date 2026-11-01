@@ -46,7 +46,7 @@ object CrashLog {
     }
 
     fun report(thread: String, error: Throwable, at: Long): String = buildString {
-        append("Herdr Pocket ").append(BuildConfig.VERSION_NAME).append(" (").append(BuildConfig.VERSION_CODE).append(")\n")
+        append("Automagik ").append(BuildConfig.VERSION_NAME).append(" (").append(BuildConfig.VERSION_CODE).append(")\n")
         append("Android ").append(Build.VERSION.RELEASE).append(" (API ").append(Build.VERSION.SDK_INT).append(") · ")
         append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append('\n')
         append(SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.US).format(Date(at))).append(" · thread ").append(thread).append("\n\n")
