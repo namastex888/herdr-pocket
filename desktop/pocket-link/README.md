@@ -29,7 +29,9 @@ It needs Node.js 20.3+ and herdr-core (`hc`), on macOS or Linux (systemd).
   `~/.local/bin/automagik-meter` (and the meter's own store, see its README).
 - **Where its state lives:** `${XDG_STATE_HOME:-~/.local/state}/automagik-pocket-link/`, mode 0700,
   outside the mod folder: this computer's key (`secret.key`, the identity phones pair with), the
-  paired phones, the current pairing code, the bridge's address, its log and the meter's status.
+  paired phones, the current pairing code, the bridge's address, its log and the meter's status,
+  each 0600; and `public-status.json` (0644), which says only whether phones are connected
+  ([For other mods](#for-other-mods)).
   - **Reinstalling the mod is safe.** Deleting `mods/pocket-link/` and copying it again keeps every
     pairing; only **Install the bridge** (npm) needs pressing again.
   - Older versions kept it in `mods/pocket-link/.state/`. The first time the new bridge runs, it
@@ -56,6 +58,54 @@ It needs Node.js 20.3+ and herdr-core (`hc`), on macOS or Linux (systemd).
 
 A paired phone can use every herdr-core session on this computer, just like a terminal running `hc`.
 Pair only your own phones. Remove one in the dialog and it's disconnected at once.
+
+## For other mods
+
+Another mod (a sidebar dot, say) can tell whether a phone is connected from `public-status.json`
+in the state folder. It is **read-only for other mods**: only the bridge writes it, and no other
+file in the folder is part of this contract.
+
+**Where it is.** The first that applies, as `bridge/state.mjs` (`stateDir`) resolves it:
+
+1. `$POCKET_LINK_STATE_DIR`, when set to an absolute path.
+2. `${XDG_STATE_HOME:-~/.local/state}/automagik-pocket-link-<hash>/`, when `HERDR_APP_HOME` is set
+   to an absolute path other than `~/.config/herdr-app`. `<hash>` is the first 8 hex characters of
+   the SHA-256 of the resolved `HERDR_APP_HOME` path.
+3. `${XDG_STATE_HOME:-~/.local/state}/automagik-pocket-link/`.
+
+A relative `XDG_STATE_HOME` or `HERDR_APP_HOME` is ignored. The folder is 0700, so only your own
+user can read the file.
+
+**What it holds** (schema 1):
+
+```json
+{
+  "schema": 1,
+  "running": true,
+  "updated": 1793520000000,
+  "phones_connected": 1,
+  "phones": [{ "name": "Pixel 9", "since": 1793519400000 }]
+}
+```
+
+- `schema`: 1. A new field can be added within schema 1, so ignore fields you don't know. Removing
+  or renaming a field, or changing its type or meaning, takes a new number: treat any value but 1
+  as unknown.
+- `running`: the bridge is serving. A clean stop (**Turn off**, `bridge.mjs stop`, logout) writes
+  `false`, with no phones.
+- `updated`: when it was written, in epoch milliseconds. While it runs, the bridge rewrites it at
+  least every 30 seconds (every 20 today) and whenever a phone connects or hangs up.
+- `phones_connected`: how many phones have a session open now. A phone with several sessions open
+  counts once.
+- `phones`: one entry per connected phone, oldest first: `name`, the device name the phone sent
+  when it paired, and `since`, when its oldest open session began (epoch ms).
+
+**Staleness.** If `updated` is more than 90 seconds old, the bridge stopped without saying so
+(killed, or the computer slept): treat it as `running: false` with no phones. Treat a missing or
+unreadable file, or another `schema`, the same way.
+
+It never holds the pairing ticket, this computer's endpoint id, a phone's key or any secret. Those
+stay in `status.json` and the other 0600 files, which other mods must not read.
 
 See [RECIPE.md](RECIPE.md) for how it's built.
 

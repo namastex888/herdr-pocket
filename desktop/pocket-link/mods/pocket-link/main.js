@@ -43,9 +43,12 @@ export default class PocketLink extends View {
       cx.notify();
       // The bridge writes its state (pairing, phones, its address) in a folder outside the
       // mod, and `status` says which.
+      // public-status.json changes every 20 s for other mods (bridge/presence.mjs); it says nothing this dialog shows.
+      const own = (path) => /(^|\/)public-status\.json(\.\d+\.tmp)?$/.test(path);
       for (;;) {
         const dir = this.status?.state;
-        await (dir ? watchFolder(dir) : Promise.reject()).catch(() => cx.sleep(3000));
+        const changed = await (dir ? watchFolder(dir) : Promise.reject()).catch(() => cx.sleep(3000));
+        if (Array.isArray(changed) && changed.length && changed.every(own)) continue;
         await this.reload();
         cx.notify();
       }
