@@ -356,12 +356,13 @@ fun stateName(word: String) = when (word) { "blocked" -> "Needs you"; "working" 
                 else TextButton(onClick = { vm.reconnect(host.id) }) { Text("Reconnect") }
             }
         }
-        // Today: three counts and nothing else above the agents (spend joins them once the usage meter reports it).
+        // Today: the counts and nothing else above the agents; spent today joins them once a usage meter reports.
         if (space == null) item(key = "today") {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 CountCard(pulse.needsYou, if (pulse.needsYou == 1) "needs you" else "need you", Blocked, Modifier.weight(1f))
                 CountCard(pulse.working, "working", Working, Modifier.weight(1f))
                 CountCard(pulse.machines, "connected", Ink, Modifier.weight(1f))
+                rememberSpend(state).takeIf { !it.coverage.none }?.let { SpendCount(it, Modifier.weight(1f)) }
             }
             Spacer(Modifier.height(12.dp))
             val focus = LocalFocusManager.current

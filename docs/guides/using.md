@@ -34,7 +34,8 @@ to the tab you opened it from. Back on any other tab goes to Today. **Settings**
 top.
 
 - **Today** lists the agents that need you first, then the ones that finished, across every
-  connected machine. The counts at the top are needs you, working and machines connected.
+  connected machine. The counts at the top are needs you, working, machines connected
+  and, once a usage meter reports, spent today.
 - **Projects** has one card per git repository. Spaces in the same repository, like a squad's
   worktrees, share one card. A folder that isn't a repository is a project of its own. Tap a card
   for its tasks, spaces and agents.
@@ -43,6 +44,7 @@ top.
 - **Tasks** groups agents by branch: Needs you, Working, Done, then Idle. Work on `main`, `master`
   or `dev`, or with no branch, is the project's **Untasked** row.
 - **Machines** lists your machines, with **Pair with Herdr desktop** and **Add machine**.
+- Spend appears once the [usage meter](#spend) runs on a machine.
 - Space names, tab order and splits come from the desktop's `herdr-app` document, including
   machines that a core forwards.
 - Pull down on the list to refresh or retry. A dropped connection shows **Reconnect**.
@@ -51,6 +53,38 @@ top.
 - Leaving a terminal or closing the app never stops the program on the computer.
 - **Settings → About → Explore the interface with sample data** shows a labelled demo without a
   machine.
+
+## Spend
+
+The Automagik meter ([`meter/`](../../meter/README.md)) counts the tokens your coding agents use
+on each machine and publishes a small `herdr-meter` summary there. The app reads that summary from
+each machine you're connected to and sums it. It never writes it. With no meter on any machine,
+**Projects** shows one hint and no numbers.
+
+- **Today:** **spent today**, from local midnight, across every reporting machine.
+- **Projects:** each repository's $ over the last 24 hours, plus its average $ per task, task count
+  and active hours per task over 30 days. A chart shows today's $ by hour for all projects together,
+  because the meter's hourly series isn't split by project.
+- **A project:** pick **24h**, **7d** or **30d** to see its tasks, cost per task (untasked work
+  excluded), $ spent with tokens and the share read from cache, active hours per task, and its
+  tasks by spend, finished ones included.
+- **Tasks:** each branch's $ and active hours over 30 days.
+
+What the numbers mean:
+
+- Every $ is an **API-equivalent estimate at list price**, not an amount billed. The price
+  table's date is in the footnote. A harness that reports its own $ (omp) counts as reported.
+- **$ —** means the meter has tokens but no price for that model. Tokens still count.
+- **≥ $x** is a lower bound. Either some tokens have no price, or some data is missing: the meter
+  started counting inside the window, or it cut detail to keep its summary small.
+- **—** means no reporting machine has usage for it.
+- A task is a repository and branch. Work on a trunk branch, or with no branch, is untasked.
+  **Active hours** count the hours with any usage, not wall-clock time.
+- 24h, 7d and 30d end at each machine's last update.
+- The line above the numbers names the machines that aren't counted: "2 of 3 machines reporting
+  · build-box data 3 h old · no meter on laptop". A machine whose summary is from a newer meter
+  than the app understands says **update the app or the meter**. Totals never drop a machine
+  silently.
 
 ## Terminals
 
