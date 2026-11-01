@@ -1,9 +1,9 @@
 # meter
 
 `meter` counts the tokens coding agents use on one machine and publishes a small summary to that
-machine's herdr-core, where Pocket can read it. Design: RFC 0005, usage meter
-(`docs/rfcs/0005-usage-meter.md`, Draft). Rows follow `ae/1` (agent event envelope, revision 2,
-owned by automagik-herdr).
+machine's herdr-core, where Pocket can read it. Design:
+[RFC 0005](../docs/rfcs/0005-usage-meter.md) (Draft). Rows follow `ae/1` (agent event envelope,
+revision 2, owned by automagik-herdr).
 
 It runs once and exits. It has no daemon, no listener and makes no network calls; the only process
 it talks to is the local `hc`.

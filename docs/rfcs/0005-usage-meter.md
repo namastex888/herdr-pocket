@@ -23,7 +23,11 @@ everything under Design and Alternatives is a proposal, not a decision.
 
 ## Current state
 
-- No `meter/` folder exists yet.
+- `meter/` holds the first slice ([meter/README.md](../../meter/README.md)): `meter sync` reads
+  omp and Claude Code logs into hourly `agent.usage` rows in a per-machine SQLite file and
+  publishes a `herdr-meter` summary doc with `doc.get`/`doc.set`. Codex, the desktop trigger,
+  the phone display and installers are not built yet. The design below predates it; where they
+  differ (one row per rollup hour rather than per event; the doc's fields), the code is current.
 - The app already reads herdr-core documents: it calls `doc.get` for the `herdr-app` document,
   locally and on forwarded machines (`android/app/src/main/java/ai/namastex/automagik/PocketViewModel.kt:440`,
   `:446`). A summary document would travel the same way.

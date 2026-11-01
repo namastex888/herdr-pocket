@@ -6,6 +6,7 @@ Short rules for coding agents working in this repo. Humans: the same rules apply
 
 - `android/`: the app (Gradle). Run Gradle from there: `cd android && ./gradlew …`.
 - `desktop/pocket-link/`: the Herdr desktop mod.
+- `meter/`: the usage meter (Rust). Run Cargo from there: `cd meter && cargo test`.
 - Root: `version.properties`, `scripts/version.sh`, `docs/`, `.github/`.
 
 ## Working
