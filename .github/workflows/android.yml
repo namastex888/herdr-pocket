@@ -41,7 +41,7 @@ jobs:
         id: apk
         run: |
           version=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts)
-          name="herdr-pocket-${version}-${GITHUB_SHA::7}-debug.apk"
+          name="automagik-${version}-${GITHUB_SHA::7}-debug.apk"
           cp app/build/outputs/apk/debug/app-debug.apk "$name"
           echo "name=$name" >> "$GITHUB_OUTPUT"
 
@@ -126,13 +126,13 @@ jobs:
           name=$(jq -r '.elements[0].versionName' "$meta")
           tag="build-$code"
           if gh release view "$tag" >/dev/null 2>&1; then echo "::notice::$tag is already published."; exit 0; fi
-          cp app/build/outputs/apk/release/app-release.apk herdr-pocket.apk
-          sha=$(sha256sum herdr-pocket.apk | cut -d' ' -f1)
+          cp app/build/outputs/apk/release/app-release.apk automagik.apk
+          sha=$(sha256sum automagik.apk | cut -d' ' -f1)
           # A merge commit's subject is "Merge pull request #N…"; its body is the pull request's title.
           notes=$(git log -1 --format=%b | head -c 500)
           [ -n "$notes" ] || notes=$(git log -1 --format=%s | head -c 500)
           jq -n --argjson code "$code" --arg name "$name" --arg sha "$sha" --arg notes "$notes" \
-            --arg url "https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/herdr-pocket.apk" \
+            --arg url "https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/automagik.apk" \
             '{versionCode: $code, versionName: $name, url: $url, sha256: $sha, notes: $notes}' > latest.json
-          gh release create "$tag" herdr-pocket.apk latest.json --target "$GITHUB_SHA" --latest \
+          gh release create "$tag" automagik.apk latest.json --target "$GITHUB_SHA" --latest \
             --title "$name ($code)" --notes "$notes"$'\n\n'"SHA-256: \`$sha\`"
