@@ -15,5 +15,6 @@ Write one from [`_Templates/decision.md`](../_Templates/decision.md).
 | [Alerts are native Android notifications, in the app too](native-notifications.md) | Implemented | #17 |
 | [Answering from the lock screen starts off](lock-screen-answers-off.md) | Implemented | #19 |
 | [Updates install silently, and notifications say so](updates-install-silently.md) | Implemented | |
+| [Pocket Link keeps its state outside the mod folder](pocket-link-state-outside-mod.md) | Implemented | |
 
 Back to the [docs home](../_index.md).

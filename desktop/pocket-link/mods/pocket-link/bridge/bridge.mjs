@@ -4,7 +4,7 @@
 //
 //   node bridge.mjs serve            run the bridge (the mod starts it; `install` keeps it running at login)
 //   node bridge.mjs pair [minutes]   make a one-time pairing link and QR, print {link, expires, rows}
-//   node bridge.mjs status           print {running, id, ticket, devices, pairing, login}
+//   node bridge.mjs status           print {running, id, ticket, devices, pairing, login, state}
 //   node bridge.mjs start | stop     start the bridge detached; stop it (and its login service)
 //   node bridge.mjs forget <id>      remove a paired phone
 //   node bridge.mjs install|uninstall   start at login (LaunchAgent on macOS, systemd user unit on Linux)
@@ -12,7 +12,7 @@
 //                                    (or on this computer and that machine)
 //                                    (`serve` does it 10 minutes after each pass; see meter.mjs)
 //
-// State lives in ../.state (hidden, so Herdr doesn't reload the mod when it changes).
+// State lives outside the mod folder (see state.mjs), so reinstalling the mod keeps the pairings.
 import { Endpoint, EndpointTicket, SecretKey } from '@number0/iroh'
 import { spawn, execFileSync } from 'node:child_process'
 import { randomBytes, timingSafeEqual, createHash } from 'node:crypto'
@@ -22,24 +22,27 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import QRCode from 'qrcode'
 import { startMeter, failing } from './meter.mjs'
+import { open as openState } from './state.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const STATE = join(HERE, '..', '.state')
-const files = {
-  key: join(STATE, 'secret.key'), status: join(STATE, 'status.json'), devices: join(STATE, 'devices.json'),
-  pairing: join(STATE, 'pairing.json'), log: join(STATE, 'bridge.log'), meter: join(STATE, 'meter.json'),
-}
 const SESSION = [...Buffer.from('herdr-pocket/1')]
 const PAIR = [...Buffer.from('herdr-pocket/pair/1')]
 const MAX_LINE = 4096
 const LABEL = 'dev.herdr.pocket-link'
 
-mkdirSync(STATE, { recursive: true, mode: 0o700 })
+// As a service, stderr already is the log file; in a terminal, write both.
+let files = null
+const log = (...args) => { const line = `${new Date().toISOString()} ${args.join(' ')}\n`; process.stderr.write(line); if (process.stderr.isTTY && files) fs.appendFile(files.log, line, { mode: 0o600 }).catch(() => {}) }
+// Outside the mod folder (state.mjs); the first run moves an older <mod>/.state there.
+// `dir` is the old one only while an older bridge still runs from it; `target` is where it belongs.
+const { dir: STATE, target: STATE_HOME } = openState({ env: process.env, home: homedir(), modRoot: join(HERE, '..'), log })
+files = {
+  key: join(STATE, 'secret.key'), status: join(STATE, 'status.json'), devices: join(STATE, 'devices.json'),
+  pairing: join(STATE, 'pairing.json'), log: join(STATE, 'bridge.log'), meter: join(STATE, 'meter.json'),
+}
 const readJson = (path, fallback) => { try { return JSON.parse(readFileSync(path, 'utf8')) } catch { return fallback } }
 // Atomic, owner-only writes: a reader never sees half a file.
 const writeJson = (path, value) => { const tmp = `${path}.${process.pid}.tmp`; writeFileSync(tmp, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 }); renameSync(tmp, path) }
-// As a service, stderr already is the log file; in a terminal, write both.
-const log = (...args) => { const line = `${new Date().toISOString()} ${args.join(' ')}\n`; process.stderr.write(line); if (process.stderr.isTTY) fs.appendFile(files.log, line, { mode: 0o600 }).catch(() => {}) }
 const devices = () => readJson(files.devices, [])
 // Older versions wrote QR files here; clean them up.
 const clearQr = () => { for (const f of readdirSync(STATE)) if (/^qr-\d+\.svg$/.test(f)) try { unlinkSync(join(STATE, f)) } catch {} }
@@ -134,7 +137,7 @@ async function session(conn, bi) {
 }
 
 // The usage meter on this computer and every connected machine (meter.mjs). Its state is
-// .state/meter.json; the dialog shows only machines that keep failing.
+// meter.json in the state dir; the dialog shows only machines that keep failing.
 const meterLoop = (only = null) => startMeter({ hc: hcPath(), read: () => readJson(files.meter, {}), write: s => writeJson(files.meter, s), log, only })
 
 async function serve() {
@@ -194,7 +197,8 @@ function loginService() {
   <key>Label</key><string>${LABEL}</string>
   <key>ProgramArguments</key><array><string>${nodePath()}</string><string>${join(HERE, 'bridge.mjs')}</string><string>serve</string></array>
   <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
-  <key>StandardErrorPath</key><string>${files.log}</string>
+  <key>EnvironmentVariables</key><dict><key>POCKET_LINK_STATE_DIR</key><string>${STATE_HOME}</string></dict>
+  <key>StandardErrorPath</key><string>${join(STATE_HOME, 'bridge.log')}</string>
 </dict></plist>
 `, on: () => {
       // A bootout finishes in the background: bootstrap again until launchd lets go of the old one.
@@ -214,6 +218,7 @@ Description=Herdr Pocket Link bridge
 
 [Service]
 ExecStart=${nodePath()} ${join(HERE, 'bridge.mjs')} serve
+Environment="POCKET_LINK_STATE_DIR=${STATE_HOME}"
 Restart=on-failure
 
 [Install]
@@ -233,7 +238,7 @@ try {
     out({ running: Boolean(s.pid && alive(s.pid)), id: s.id ?? null, name: s.name ?? null, ticket: s.ticket ?? null,
       devices: devices().map(({ id, name, paired, seen }) => ({ id, name, paired, seen })),
       pairing: p && Date.now() < p.expires ? { expires: p.expires } : null, login: existsSync(loginService().path),
-      meter: { failing: failing(readJson(files.meter, {})) } })
+      meter: { failing: failing(readJson(files.meter, {})) }, state: STATE })
   }
   else if (command === 'meter') { const m = meterLoop(arg ?? null); const s = await m.pass(); m.stop(); out(s) }
   else if (command === 'start') {

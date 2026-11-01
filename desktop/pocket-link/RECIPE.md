@@ -57,7 +57,7 @@ Before the bridge can run, the dialog shows one of two other screens in place of
 ## How it behaves
 
 - **Opening:** it asks the bridge for its status and draws it.
-- **Live updates:** it then watches the mod's `.state/` folder and redraws whenever the bridge writes something there (pairing, phones, its address). Nothing polls.
+- **Live updates:** it then watches the state folder (`status` names it) and redraws whenever the bridge writes something there (pairing, phones, its address). Nothing polls.
 - **Turn on:**
   1. It installs a login service:
      - **macOS:** a LaunchAgent `dev.herdr.pocket-link` with `KeepAlive`, bootstrapped into `gui/<uid>`
@@ -102,28 +102,32 @@ Before the bridge can run, the dialog shows one of two other screens in place of
   - **`bridge.mjs`** commands:
     - `serve`
     - `pair [minutes]` prints `{link, expires, rows}`, where `rows` holds the QR modules as strings of `1`/`0`
-    - `status` prints `{running, id, name, ticket, devices, pairing, login}`
+    - `status` prints `{running, id, name, ticket, devices, pairing, login, meter, state}`
     - `start`, `stop`, `forget <id>`, `install` and `uninstall`
   - **Serving:**
     1. It binds an iroh `Endpoint` with the n0 preset, a persistent secret key and two ALPNs: `herdr-pocket/1` and `herdr-pocket/pair/1`.
     2. It writes its ticket (`EndpointTicket.fromAddr(ep.addr())`) to `status.json`, and again whenever its address changes.
     3. It accepts connections: pair requests check the code, and sessions are piped to `hc connect`.
   - **Finding `hc`:** `$HC`, then `command -v hc` in a login shell, then `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin`.
-- **`mods/pocket-link/.state/`** (hidden, so writing it doesn't reload the mod), all files mode 0600 and written atomically:
+- **The state folder,** `${XDG_STATE_HOME:-~/.local/state}/automagik-pocket-link/` (`bridge/state.mjs`), mode 0700, outside the mod so a reinstall keeps it, all files mode 0600 and written atomically:
   - `secret.key`
   - `status.json`
   - `devices.json`
   - `pairing.json`
   - `bridge.log`
+  - `meter.json`
+  - Another `HERDR_APP_HOME` gets `automagik-pocket-link-<hash>/`; `POCKET_LINK_STATE_DIR` overrides both, and the login service is given the resolved folder that way (launchd and systemd don't see the dialog's environment).
+  - **Moving from `mods/pocket-link/.state/`:** when the new folder has no `secret.key`, the bridge moves each old file with `link()` and `unlink()` (atomic, never over an existing file, the mode kept), then logs one line. While an older bridge still runs from `.state/` (its `status.json` pid is alive), it uses `.state/` for that run instead and moves nothing.
 - **The phone side:** [automagik-pocket](https://github.com/automagik-dev/automagik-pocket), with `computer.iroh:iroh-android:1.2.0`. It opens the `herdr-pocket://pair` link from a scan, a paste or a tapped link, asks before pairing, and keeps its own key in no-backup storage.
 - **What it touches on the computer:**
   - **Network:** iroh's n0 preset. It keeps a connection to n0's public relays and publishes the bridge's public key and current addresses to n0's address lookup, so phones find it after an IP change. Phones connect in over QUIC/UDP.
   - **Programs:** `node`, `npm` (setup only), `hc connect`, `launchctl` or `systemctl --user`, and `sh` (to find `hc` and run setup).
-  - **Files outside the folder:** only the login service file, `~/Library/LaunchAgents/dev.herdr.pocket-link.plist` or `~/.config/systemd/user/herdr-pocket-link.service`.
+  - **Files outside the folder:** the state folder above, and the login service file, `~/Library/LaunchAgents/dev.herdr.pocket-link.plist` or `~/.config/systemd/user/herdr-pocket-link.service`.
 
 ## Watch out
 
-- **`image()` won't show a file from the hidden `.state/` folder.** Drawing the QR from its modules avoids that, and also avoids image caching when a new code is made. A QR file in a visible folder would reload the mod on every code.
+- **Don't draw the QR from a file.** `image()` wouldn't show one from the old hidden `.state/` folder, and a QR file inside the mod folder would reload the mod on every code. Drawing it from its modules avoids that, and also avoids image caching when a new code is made.
+- **Keep state out of the mod folder.** Reinstalling a mod is `rm -rf` and a copy; a `.state/` inside it took the computer's key and every pairing with it.
 - **`exec` stops a program after 30s**, so `serve` can't run under it. The bridge has to run as a login service or detached (`start`), and npm setup also has to run detached.
 - **`launchctl bootstrap` right after `bootout` fails** with "Input/output error" while launchd is still unloading the old job. Retry it for a few seconds.
 - **The Homebrew Cellar path breaks:** `process.execPath` under Homebrew is a versioned Cellar path that disappears on upgrade. Write the `opt/<formula>/bin/node` link into the service.
@@ -145,7 +149,7 @@ Before the bridge can run, the dialog shows one of two other screens in place of
 - **Turn on:** `node bridge/bridge.mjs status` reports `"running":true,"login":true`, and on macOS `launchctl print gui/$(id -u)/dev.herdr.pocket-link` shows `state = running`.
 - **Pair a phone:**
   - A QR appears and decodes, with any QR reader, to the same link `bridge.mjs pair` printed.
-  - Its `c=` equals the code in `.state/pairing.json`.
+  - Its `c=` equals the code in `pairing.json` in the state folder.
   - The countdown falls each second.
 - **Pairing with Herdr Pocket** (scan, or `adb shell am start -a android.intent.action.VIEW -d '<link>'`):
   - The phone shows "Pair with <host>?". Pair connects it and lists the agents.
